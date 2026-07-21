@@ -1,6 +1,6 @@
-# castillo.lab — Commercial Pricing Platform
+# castle.lab — Commercial Pricing Platform
 
-Turn vendor costs into market-ready retail prices. **castillo.lab** is an
+Turn vendor costs into market-ready retail prices. **castle.lab** is an
 internal web app that models multi-currency landed costs, enforces target
 margins, and produces ERP-ready price files across the UAE, KSA and Qatar
 markets — replacing a sprawl of spreadsheets with one auditable pricing engine.
@@ -13,7 +13,7 @@ _(runs on synthetic data — no login or credentials required; see [Demo mode](#
 ## What it does
 
 A pricing decision used to mean juggling vendor cost sheets, FX rates, market
-markups, VAT and rounding rules by hand. castillo.lab centralises all of it:
+markups, VAT and rounding rules by hand. castle.lab centralises all of it:
 
 - **Landed cost engine** — EXW vendor cost → shipping → FX conversion to AED →
   customs duty, per item, in any supported currency.
