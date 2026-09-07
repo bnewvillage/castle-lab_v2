@@ -1,14 +1,24 @@
-import React, { useState, useCallback } from 'react';
-import * as XLSX from 'xlsx';
+import React, { useState, useCallback, useEffect } from 'react';
+import * as XLSX from 'xlsx-js-style';
 import { fetchBrands, fetchRates, bulkSaveItems, checkExisting, fetchItemsByCodes } from '../../lib/db';
 import { calcMSRPs, calcCostBasedMSRPs, DEFAULT_COST_MARGIN_PCT } from '../../lib/pricing';
-import { t, inp, btnW, btnG, btnSm, lbl, groupBox, groupHead } from './styles';
+import { t, inp, sel, btnW, btnG, btnSm, lbl, groupBox, groupHead, CURRENCIES } from './styles';
 import { useAuth } from '../../lib/AuthContext';
 import BrandSelect from './BrandSelect';
+import BulkUpdatePaste from './BulkUpdatePaste';
+import MassOverride from './MassOverride';
 
 const PRICE_USED_OPTIONS = ['primary_ex_vat','primary_inc_vat','secondary_ex_vat','secondary_inc_vat','cost_based'];
 const SOURCES            = ['Portal','File','Website','Invoice','Estimate'];
-const CURRENCIES         = ['EUR','USD','GBP','AUD','JPY'];
+const LARGE_THRESHOLD    = 5000;  // above this, paginate review and show progress
+const REVIEW_PAGE_SIZE   = 100;   // rows per page in review / dup tables
+// Fields that are merged from existing DB data when blank in import (merge mode)
+const MERGE_FIELDS = ['item_name','barcode','cost_currency','exw_cost','shipping_rate',
+  'customs_duty_rate','msrp_primary_currency','msrp_primary_ex_vat','msrp_primary_inc_vat',
+  'msrp_secondary_currency','msrp_secondary_ex_vat','msrp_secondary_inc_vat',
+  'price_used','target_margin_pct','cost_source','price_source'];
+// Paste import writes primaries only, so cost_based has no secondary fallback here.
+const PASTE_PRICE_USED   = ['primary_ex_vat','primary_inc_vat','cost_based'];
 
 // Strip thousands-separator commas before parsing (Excel formats 1185 as "1,185.00")
 const toNum = (v) => { const n = parseFloat(String(v ?? '').replace(/,/g, '')); return isNaN(n) ? null : n; };
@@ -53,6 +63,19 @@ async function generateTemplate() {
   const importWs = XLSX.utils.aoa_to_sheet(importData);
   importWs['!cols'] = importHeaders.map(h => ({ wch: Math.max(h.length+4, 16) }));
   importWs['!freeze'] = { xSplit:0, ySplit:2 };
+
+  // Pre-format barcode column as Text so Excel doesn't auto-convert long numeric barcodes
+  const barcodeCol = importHeaders.indexOf('barcode');
+  if (barcodeCol >= 0) {
+    for (let r = 2; r <= 101; r++) {
+      const addr = XLSX.utils.encode_cell({ r, c: barcodeCol });
+      importWs[addr] = { t: 's', v: '', s: { numFmt: '@' } };
+    }
+    const range = XLSX.utils.decode_range(importWs['!ref']);
+    range.e.r = Math.max(range.e.r, 101);
+    importWs['!ref'] = XLSX.utils.encode_range(range);
+  }
+
   XLSX.utils.book_append_sheet(wb, importWs, 'Import');
 
   const maxLen = Math.max(brands.length, PRICE_USED_OPTIONS.length, CURRENCIES.length, SOURCES.length);
@@ -114,7 +137,7 @@ function validateAndCalc(row, brandMap, markupCache, additionalMarkupCache, rate
   let real_msrp_aed = null, real_msrp_sar = null, real_msrp_qat = null;
   if (errors.length === 0) {
     const msrps = isCostBased
-      ? calcCostBasedMSRPs(toNum(row.exw_cost), row.cost_currency, targetMargin ?? DEFAULT_COST_MARGIN_PCT, rates)
+      ? calcCostBasedMSRPs(toNum(row.exw_cost), row.cost_currency, targetMargin ?? DEFAULT_COST_MARGIN_PCT, rates, additionalMarkupCache[brandCode] ?? null)
       : calcMSRPs(priceVal, priceCurrency, markupCache[brandCode] ?? 10, additionalMarkupCache[brandCode] ?? null, rates);
     if (msrps) ({ msrp_aed, msrp_sar, msrp_qat, real_msrp_aed, real_msrp_sar, real_msrp_qat } = msrps);
   }
@@ -127,7 +150,7 @@ function validateAndCalc(row, brandMap, markupCache, additionalMarkupCache, rate
   };
 }
 
-async function processRows(rawRows, brands, rates) {
+async function processRows(rawRows, brands, rates, onProgress) {
   const brandMap = Object.fromEntries(brands.map(b => [b.brand_code, b]));
   const markupCache = {};
   const additionalMarkupCache = {};
@@ -135,10 +158,16 @@ async function processRows(rawRows, brands, rates) {
     markupCache[b.brand_code]           = b.brand_rules?.markup_percentage ?? 10;
     additionalMarkupCache[b.brand_code] = b.brand_rules?.additional_markup_pct ?? null;
   }
-  const processed = rawRows.map((row, i) => ({
-    ...validateAndCalc(row, brandMap, markupCache, additionalMarkupCache, rates),
-    _rowNum: i + 3,
-  }));
+  const PROC_CHUNK = 500;
+  const processed  = [];
+  for (let start = 0; start < rawRows.length; start += PROC_CHUNK) {
+    const end = Math.min(start + PROC_CHUNK, rawRows.length);
+    for (let j = start; j < end; j++) {
+      processed.push({ ...validateAndCalc(rawRows[j], brandMap, markupCache, additionalMarkupCache, rates), _rowNum: j + 3 });
+    }
+    onProgress?.(end, rawRows.length);
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
 
   // Flag rows whose item_code appears more than once in the file
   const codeCount = {};
@@ -152,6 +181,143 @@ async function processRows(rawRows, brands, rates) {
   }
 
   return { processed, brandMap, markupCache, additionalMarkupCache };
+}
+
+// ── PASTE IMPORT PANEL ────────────────────────────────────────
+const PASTE_COLS = [
+  { k:'sku',                  label:'SKU *',          ph:'ABC123' },
+  { k:'item_name',            label:'Item name',      ph:'Description' },
+  { k:'exw_cost',             label:'EXW cost *',     ph:'120.50' },
+  { k:'msrp_primary_ex_vat',  label:'MSRP ex VAT',    ph:'400' },
+  { k:'msrp_primary_inc_vat', label:'MSRP inc VAT',   ph:'480' },
+  { k:'barcode',              label:'Barcode',        ph:'5901234123457' },
+];
+
+const pasteBox = {
+  width:'100%', minHeight:300, resize:'vertical',
+  background:t.bg2, border:`1px solid ${t.b2}`, borderRadius:8,
+  padding:'10px 12px', fontSize:12.5, lineHeight:1.7,
+  color:t.t1, fontFamily:'var(--font-mono)',
+  outline:'none', boxSizing:'border-box', whiteSpace:'pre',
+};
+
+function PastePanel({ paste, setPasteField, opts, setOpt, brands, processing, isViewer, onProcess }) {
+  const skuCount = paste.sku.split('\n').filter(s => s.trim()).length;
+  const isCostBased = opts.price_used === 'cost_based';
+  const ready = skuCount > 0 && opts.brand_code && !processing && !isViewer;
+
+  const Field = ({ label, hint, children }) => (
+    <div style={{ flex:'1 1 150px', minWidth:140 }}>
+      <label style={lbl}>{label}</label>
+      {children}
+      {hint && <div style={{ fontSize:10, color:t.t4, marginTop:4, fontFamily:'var(--font-mono)' }}>{hint}</div>}
+    </div>
+  );
+
+  return (
+    <>
+      {/* Options applied to every pasted row */}
+      <div style={{ ...groupBox(false), marginBottom:16 }}>
+        <div style={{ ...groupHead, marginBottom:14 }}>
+          Applied to every row
+        </div>
+        <div style={{ display:'flex', flexWrap:'wrap', gap:12 }}>
+          <Field label="Brand *">
+            <BrandSelect brands={brands} value={opts.brand_code}
+              onChange={v => setOpt('brand_code', v)} hasError={!opts.brand_code} />
+          </Field>
+          <Field label="MSRP source *" hint={isCostBased ? 'derived from cost' : undefined}>
+            <select value={opts.price_used} onChange={e=>setOpt('price_used', e.target.value)}
+              style={sel(true,false)}>
+              {PASTE_PRICE_USED.map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </Field>
+          <Field label="Cost currency *">
+            <select value={opts.cost_currency} onChange={e=>setOpt('cost_currency', e.target.value)} style={sel(true,false)}>
+              {CURRENCIES.map(c => <option key={c}>{c}</option>)}
+            </select>
+          </Field>
+          <Field label="MSRP currency" hint={isCostBased ? 'unused' : undefined}>
+            <select value={opts.msrp_primary_currency} onChange={e=>setOpt('msrp_primary_currency', e.target.value)}
+              style={{ ...sel(true,false), opacity: isCostBased ? 0.5 : 1 }} disabled={isCostBased}>
+              {CURRENCIES.map(c => <option key={c}>{c}</option>)}
+            </select>
+          </Field>
+          <Field label="Cost source">
+            <select value={opts.cost_source} onChange={e=>setOpt('cost_source', e.target.value)} style={sel(!!opts.cost_source,false)}>
+              <option value="">—</option>
+              {SOURCES.map(s => <option key={s}>{s}</option>)}
+            </select>
+          </Field>
+          <Field label="Price source">
+            <select value={opts.price_source} onChange={e=>setOpt('price_source', e.target.value)} style={sel(!!opts.price_source,false)}>
+              <option value="">—</option>
+              {SOURCES.map(s => <option key={s}>{s}</option>)}
+            </select>
+          </Field>
+          <Field label="Shipping %" hint="default 0">
+            <input value={opts.shipping_rate} onChange={e=>setOpt('shipping_rate', e.target.value)}
+              placeholder="0" style={inp(!!opts.shipping_rate,false)} />
+          </Field>
+          <Field label="Customs %" hint="default 5.5">
+            <input value={opts.customs_duty_rate} onChange={e=>setOpt('customs_duty_rate', e.target.value)}
+              placeholder="5.5" style={inp(!!opts.customs_duty_rate,false)} />
+          </Field>
+          {isCostBased && (
+            <Field label="Target margin %" hint="default 25">
+              <input value={opts.target_margin_pct} onChange={e=>setOpt('target_margin_pct', e.target.value)}
+                placeholder="25" style={inp(!!opts.target_margin_pct,false)} />
+            </Field>
+          )}
+        </div>
+      </div>
+
+      {/* Pasted columns */}
+      <div style={{ ...groupBox(false), marginBottom:16 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:16, flexWrap:'wrap', marginBottom:14 }}>
+          <div>
+            <div style={{ ...groupHead, marginBottom:4 }}>Paste columns</div>
+            <div style={{ fontSize:12, color:t.t4 }}>
+              One row per line. Columns join by line number — leave a line blank to skip that field, not the row.
+            </div>
+          </div>
+          <button
+            onClick={onProcess}
+            disabled={!ready}
+            style={{ ...btnW, opacity: ready?1:0.4, cursor: ready?'pointer':'not-allowed', whiteSpace:'nowrap' }}
+          >{processing ? 'Processing...' : `Process ${skuCount} row${skuCount===1?'':'s'} →`}</button>
+        </div>
+
+        <div style={{ display:'flex', flexWrap:'wrap', gap:10, alignItems:'flex-start' }}>
+          {PASTE_COLS.map(({ k, label, ph }) => {
+            const n = paste[k].split('\n').filter(s => s.trim()).length;
+            const mismatch = k !== 'sku' && n > 0 && n !== skuCount;
+            return (
+              <div key={k} style={{ flex:'1 1 150px', minWidth:140 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', gap:6 }}>
+                  <label style={{ ...lbl, marginBottom:6 }}>{label}</label>
+                  {n > 0 && (
+                    <span style={{ fontSize:10, marginBottom:6, fontFamily:'var(--font-mono)', color: mismatch ? t.amber : t.t4 }}>{n}</span>
+                  )}
+                </div>
+                <textarea
+                  value={paste[k]}
+                  onChange={e => setPasteField(k, e.target.value)}
+                  placeholder={ph}
+                  spellCheck={false}
+                  style={{ ...pasteBox, borderColor: mismatch ? 'rgba(245,166,35,0.4)' : t.b2 }}
+                />
+              </div>
+            );
+          })}
+        </div>
+
+        {!opts.brand_code && skuCount > 0 && (
+          <div style={{ marginTop:12, fontSize:12, color:t.amber }}>Pick a brand — item codes are built as BRAND-SKU.</div>
+        )}
+      </div>
+    </>
+  );
 }
 
 // ── INLINE EDITABLE CELL ──────────────────────────────────────
@@ -417,6 +583,33 @@ export default function BulkUpload({ onToast }) {
   const [showErrorsOnly,  setShowErrorsOnly]  = useState(false);
   const [errorItems,      setErrorItems]      = useState([]);
   const [expandImportErr, setExpandImportErr] = useState(false);
+  const [reviewPage,      setReviewPage]      = useState(0);
+  const [dupPage,         setDupPage]         = useState(0);
+  const [mergeEmpty,      setMergeEmpty]      = useState(false);
+
+  // ── Paste import ─────────────────────────────────────────────
+  const [inputMode, setInputMode] = useState('file'); // 'file' | 'paste'
+  const [pasteMode, setPasteMode] = useState('full'); // 'full' = create/replace | 'update' = patch existing
+  const [paste, setPaste] = useState({
+    sku: '', item_name: '', barcode: '', exw_cost: '',
+    msrp_primary_ex_vat: '', msrp_primary_inc_vat: '',
+  });
+  const [pasteOpts, setPasteOpts] = useState({
+    brand_code: '', cost_currency: 'EUR', msrp_primary_currency: 'EUR',
+    price_used: 'primary_ex_vat', cost_source: '', price_source: '',
+    shipping_rate: '', customs_duty_rate: '', target_margin_pct: '',
+  });
+  const setPasteField = (k, v) => setPaste(p => ({ ...p, [k]: v }));
+  const setOpt        = (k, v) => setPasteOpts(p => ({ ...p, [k]: v }));
+
+  // Brand list is normally loaded as a side effect of parsing a file; paste mode
+  // needs it up front for the brand picker.
+  useEffect(() => {
+    if (inputMode !== 'paste' || Object.keys(brandMap).length) return;
+    fetchBrands()
+      .then(bs => setBrandMap(Object.fromEntries(bs.map(b => [b.brand_code, b]))))
+      .catch(e => setError('Failed to load brands: ' + e.message));
+  }, [inputMode, brandMap]);
 
   const brands = Object.values(brandMap);
   const readyRows = rows.filter(r => r._status === 'ready');
@@ -503,7 +696,9 @@ export default function BulkUpload({ onToast }) {
       if (!data.length) { setError('No data rows found. Make sure data starts from row 3.'); setProcessing(false); return; }
 
       setError('Step 6: Validating rows...');
-      const { processed } = await processRows(data, brandsArr, ratesData); // addCache already set above
+      const { processed } = await processRows(data, brandsArr, ratesData, (done, total) => {
+        if (total > LARGE_THRESHOLD) setError(`Step 6: Validating rows (${done.toLocaleString()} / ${total.toLocaleString()})...`);
+      });
       console.log('Success: processed', processed.length, 'rows, moving to summary');
       setError(null);
       setRows(processed);
@@ -513,6 +708,66 @@ export default function BulkUpload({ onToast }) {
       setError('Failed at: ' + e.message + (e.stack ? ' | ' + e.stack.split('\n')[1] : ''));
     }
     finally { setProcessing(false); }
+  };
+
+  // Builds rows from the pasted columns and feeds them into the same
+  // validate → summary → review → import pipeline the .xlsx path uses.
+  const handlePasteProcess = async () => {
+    setProcessing(true); setError(null);
+    try {
+      // Split on newlines only — line index is the join key across columns, so
+      // dropping blanks would shift every value below onto the wrong SKU.
+      const col = (k) => paste[k].split('\n').map(s => s.trim());
+      const skus = col('sku');
+      const names = col('item_name'), bars = col('barcode'), costs = col('exw_cost');
+      const exv = col('msrp_primary_ex_vat'), inv = col('msrp_primary_inc_vat');
+
+      const brand = pasteOpts.brand_code.toUpperCase().trim();
+      const data = [];
+      skus.forEach((sku, i) => {
+        if (!sku) return; // blank line in the SKU column = no row
+        data.push({
+          sku,
+          item_code:               brand ? `${brand}-${sku}` : sku,
+          item_name:               names[i] ?? '',
+          barcode:                 bars[i]  ?? '',
+          brand_code:              brand,
+          cost_currency:           pasteOpts.cost_currency,
+          exw_cost:                costs[i] ?? '',
+          msrp_primary_currency:   pasteOpts.msrp_primary_currency,
+          msrp_primary_ex_vat:     exv[i] ?? '',
+          msrp_primary_inc_vat:    inv[i] ?? '',
+          price_used:              pasteOpts.price_used,
+          cost_source:             pasteOpts.cost_source,
+          price_source:            pasteOpts.price_source,
+          shipping_rate:           pasteOpts.shipping_rate,
+          customs_duty_rate:       pasteOpts.customs_duty_rate,
+          target_margin_pct:       pasteOpts.target_margin_pct,
+        });
+      });
+
+      if (!data.length) { setError('No SKUs pasted.'); setProcessing(false); return; }
+
+      const [brandsArr, ratesData] = await Promise.all([fetchBrands(), fetchRates()]);
+      setRates(ratesData);
+      setBrandMap(Object.fromEntries(brandsArr.map(b => [b.brand_code, b])));
+      const mCache = {}, addCache = {};
+      for (const b of brandsArr) {
+        mCache[b.brand_code]   = b.brand_rules?.markup_percentage ?? 10;
+        addCache[b.brand_code] = b.brand_rules?.additional_markup_pct ?? null;
+      }
+      setMarkupCache(mCache);
+      setAdditionalMarkupCache(addCache);
+
+      const { processed } = await processRows(data, brandsArr, ratesData);
+      // processRows numbers rows for the .xlsx layout (data starts at row 3);
+      // pasted lines are 1-indexed.
+      setRows(processed.map((r, i) => ({ ...r, _rowNum: i + 1 })));
+      setError(null);
+      setStage('summary');
+    } catch (e) {
+      setError('Failed to process pasted data: ' + (e.message || e));
+    } finally { setProcessing(false); }
   };
 
   const handleConfirm = async () => {
@@ -529,6 +784,27 @@ export default function BulkUpload({ onToast }) {
         setImporting(false);
         setError('Nothing to import — all duplicates are set to "Keep existing data". Switch duplicates to "Update" to overwrite them.');
         return;
+      }
+
+      // Merge mode: fill empty import fields from existing DB data, then revalidate
+      if (mergeEmpty && stage === 'summary2') {
+        toImport = toImport.map(row => {
+          const code     = row.item_code?.toUpperCase();
+          const existing = existingItems[code];
+          if (!existing) return row;
+          let changed = false;
+          const merged = { ...row };
+          for (const field of MERGE_FIELDS) {
+            const iv = row[field];
+            const ev = existing[field];
+            const isBlank = iv === null || iv === undefined || iv === '';
+            const hasVal  = ev !== null && ev !== undefined && ev !== '';
+            if (isBlank && hasVal) { merged[field] = ev; changed = true; }
+          }
+          if (!changed) return row;
+          const revalidated = validateAndCalc(merged, brandMap, markupCache, additionalMarkupCache, rates);
+          return { ...revalidated, _rowNum: row._rowNum };
+        });
       }
 
       // Pre-check constraint fields before hitting the DB — catches values that slipped past review validation
@@ -881,6 +1157,16 @@ export default function BulkUpload({ onToast }) {
                 >Update with new data</button>
               </div>
             </div>
+            <div style={{ padding:'12px 20px', borderBottom:`1px solid ${t.b1}` }}>
+              <label style={{ display:'flex', alignItems:'center', gap:10, cursor:'pointer' }}>
+                <input type="checkbox" style={{ accentColor:t.blue, cursor:'pointer', width:14, height:14 }}
+                  checked={mergeEmpty} onChange={e => setMergeEmpty(e.target.checked)} />
+                <div>
+                  <div style={{ fontSize:12, fontWeight:500, color:mergeEmpty ? t.t1 : t.t3 }}>Keep existing values for blank fields</div>
+                  <div style={{ fontSize:11, color:t.t4, marginTop:2 }}>Fields left blank in this import won't overwrite existing data — e.g. barcodes not in your file stay intact</div>
+                </div>
+              </label>
+            </div>
 
             {/* Duplicate rows */}
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
@@ -892,7 +1178,7 @@ export default function BulkUpload({ onToast }) {
                 </tr>
               </thead>
               <tbody>
-                {dupItems.map((row,di) => {
+                {dupItems.slice(dupPage * REVIEW_PAGE_SIZE, (dupPage + 1) * REVIEW_PAGE_SIZE).map((row,di) => {
                   const mode = getMode(row.item_code);
                   const isUpdate = mode === 'keep_new';
                   return (
@@ -920,6 +1206,18 @@ export default function BulkUpload({ onToast }) {
                 })}
               </tbody>
             </table>
+            {Math.ceil(dupItems.length / REVIEW_PAGE_SIZE) > 1 && (
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'12px 20px', borderTop:`1px solid ${t.b1}` }}>
+                <span style={{ fontSize:12, color:t.t4 }}>
+                  {(dupPage * REVIEW_PAGE_SIZE + 1).toLocaleString()}–{Math.min((dupPage + 1) * REVIEW_PAGE_SIZE, dupItems.length).toLocaleString()} of {dupItems.length.toLocaleString()} duplicates
+                </span>
+                <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                  <button style={{ ...btnG, opacity: dupPage === 0 ? 0.4 : 1 }} disabled={dupPage === 0} onClick={() => setDupPage(p => p - 1)}>← Prev</button>
+                  <span style={{ fontSize:12, color:t.t3, padding:'7px 12px', border:`1px solid ${t.b2}`, borderRadius:6, fontFamily:'var(--font-mono)' }}>{dupPage + 1} / {Math.ceil(dupItems.length / REVIEW_PAGE_SIZE)}</span>
+                  <button style={{ ...btnG, opacity: dupPage >= Math.ceil(dupItems.length/REVIEW_PAGE_SIZE)-1 ? 0.4 : 1 }} disabled={dupPage >= Math.ceil(dupItems.length/REVIEW_PAGE_SIZE)-1} onClick={() => setDupPage(p => p + 1)}>Next →</button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -928,9 +1226,12 @@ export default function BulkUpload({ onToast }) {
           <div style={{ background:t.bg2, border:`1px solid ${t.b1}`, borderRadius:12, padding:'14px 20px' }}>
             <div style={{ fontSize:11, color:t.t4, fontFamily:'var(--font-mono)', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:10 }}>{newItems.length} new items — all will be created</div>
             <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
-              {newItems.map((r,ni)=>(
+              {newItems.slice(0, 500).map((r,ni)=>(
                 <span key={ni} style={{ fontSize:11, padding:'3px 10px', background:t.bg3, border:`1px solid ${t.b2}`, borderRadius:100, color:t.green, fontFamily:'var(--font-mono)' }}>{r.item_code}</span>
               ))}
+              {newItems.length > 500 && (
+                <span style={{ fontSize:11, padding:'3px 10px', background:t.bg3, border:`1px solid ${t.b2}`, borderRadius:100, color:t.t4, fontFamily:'var(--font-mono)' }}>+{(newItems.length - 500).toLocaleString()} more</span>
+              )}
             </div>
           </div>
         )}
@@ -1073,12 +1374,13 @@ export default function BulkUpload({ onToast }) {
           {errorRows.length > 0 && (
             <button
               style={{ ...btnG, border: showErrorsOnly ? '1px solid rgba(242,100,100,0.5)' : undefined, background: showErrorsOnly ? 'rgba(242,100,100,0.1)' : undefined, color: showErrorsOnly ? t.red : undefined }}
-              onClick={() => setShowErrorsOnly(v => !v)}
+              onClick={() => { setShowErrorsOnly(v => !v); setReviewPage(0); }}
             >{showErrorsOnly ? `Errors only (${errorRows.length})` : `Show errors only`}</button>
           )}
           <button style={{ ...btnW, opacity:(!readyRows.length||isViewer)?0.6:1 }}
             onClick={async () => {
               setError(null);
+              setDupPage(0);
               try {
                 const codes = readyRows.map(r => r.item_code.toUpperCase());
                 const existing = await checkExisting(codes);
@@ -1123,10 +1425,10 @@ export default function BulkUpload({ onToast }) {
               </tr>
             </thead>
             <tbody>
-              {rows
-                .map((row, i) => ({ row, i }))
-                .filter(({ row }) => !showErrorsOnly || row._status === 'error')
-                .map(({ row, i }) => {
+              {(() => {
+                const filteredWithIdx = rows.map((row, i) => ({ row, i })).filter(({ row }) => !showErrorsOnly || row._status === 'error');
+                const pageItems = filteredWithIdx.slice(reviewPage * REVIEW_PAGE_SIZE, (reviewPage + 1) * REVIEW_PAGE_SIZE);
+                return pageItems.map(({ row, i }) => {
                 const priceVal = { primary_ex_vat:row.msrp_primary_ex_vat, primary_inc_vat:row.msrp_primary_inc_vat, secondary_ex_vat:row.msrp_secondary_ex_vat, secondary_inc_vat:row.msrp_secondary_inc_vat }[row.price_used];
                 const priceCurr = row.price_used?.startsWith('primary') ? row.msrp_primary_currency : row.msrp_secondary_currency;
                 const isErr = row._status === 'error';
@@ -1234,10 +1536,28 @@ export default function BulkUpload({ onToast }) {
                     )}
                   </React.Fragment>
                 );
-              })}
+              });
+              })()}
             </tbody>
           </table>
         </div>
+        {(() => {
+          const filteredLen = rows.filter(r => !showErrorsOnly || r._status === 'error').length;
+          const totalPages  = Math.ceil(filteredLen / REVIEW_PAGE_SIZE);
+          if (totalPages <= 1) return null;
+          return (
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'12px 20px', borderTop:`1px solid ${t.b1}` }}>
+              <span style={{ fontSize:12, color:t.t4 }}>
+                Rows {(reviewPage * REVIEW_PAGE_SIZE + 1).toLocaleString()}–{Math.min((reviewPage + 1) * REVIEW_PAGE_SIZE, filteredLen).toLocaleString()} of {filteredLen.toLocaleString()}
+              </span>
+              <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                <button style={{ ...btnG, opacity: reviewPage === 0 ? 0.4 : 1 }} disabled={reviewPage === 0} onClick={() => setReviewPage(p => p - 1)}>← Prev</button>
+                <span style={{ fontSize:12, color:t.t3, padding:'7px 12px', border:`1px solid ${t.b2}`, borderRadius:6, fontFamily:'var(--font-mono)' }}>{reviewPage + 1} / {totalPages}</span>
+                <button style={{ ...btnG, opacity: reviewPage >= totalPages-1 ? 0.4 : 1 }} disabled={reviewPage >= totalPages-1} onClick={() => setReviewPage(p => p + 1)}>Next →</button>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
@@ -1248,6 +1568,50 @@ export default function BulkUpload({ onToast }) {
       {isViewer && <div style={{ background:'rgba(245,166,35,0.07)', border:'1px solid rgba(245,166,35,0.25)', borderRadius:8, padding:'10px 16px', color:t.amber, fontSize:13, marginBottom:16 }}>View only — bulk import is disabled for your account.</div>}
       {error && <div style={{ background:'rgba(242,100,100,0.08)', border:'1px solid rgba(242,100,100,0.2)', borderRadius:8, padding:'12px 16px', color:t.red, fontSize:13, marginBottom:16 }}>{error}</div>}
 
+      {/* ── Input mode ─────────────────────────────────────────── */}
+      <div style={{ display:'flex', gap:8, marginBottom:16 }}>
+        {[{ k:'file', label:'Upload .xlsx' }, { k:'paste', label:'Paste columns' }].map(({ k, label }) => (
+          <button key={k} onClick={()=>{ setInputMode(k); setError(null); }}
+            style={{ ...btnG, ...btnSm, padding:'8px 16px',
+              background: inputMode===k ? 'rgba(77,159,255,0.09)' : 'transparent',
+              borderColor: inputMode===k ? 'rgba(77,159,255,0.3)' : t.b2,
+              color: inputMode===k ? t.blue : t.t3 }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {inputMode === 'paste' ? (
+      <>
+        {/* Full writes the whole row; Update patches only the fields fed;
+            Mass Override pins market prices as manual overrides. */}
+        <div style={{ display:'flex', gap:8, marginBottom:16 }}>
+          {[{ k:'full', label:'Full' }, { k:'update', label:'Update' }, { k:'override', label:'Mass Override' }].map(({ k, label }) => (
+            <button key={k} onClick={()=>{ setPasteMode(k); setError(null); }}
+              style={{ ...btnG, ...btnSm, padding:'6px 14px',
+                background: pasteMode===k ? 'rgba(77,159,255,0.09)' : 'transparent',
+                borderColor: pasteMode===k ? 'rgba(77,159,255,0.3)' : t.b2,
+                color: pasteMode===k ? t.blue : t.t3 }}>
+              {k === 'override' ? label : `Paste columns: ${label}`}
+            </button>
+          ))}
+        </div>
+        {pasteMode === 'override' ? (
+          <MassOverride onToast={onToast} isViewer={isViewer} />
+        ) : pasteMode === 'update' ? (
+          <BulkUpdatePaste onToast={onToast} isViewer={isViewer} />
+        ) : (
+        <PastePanel
+          paste={paste} setPasteField={setPasteField}
+          opts={pasteOpts} setOpt={setOpt}
+          brands={Object.values(brandMap)}
+          processing={processing} isViewer={isViewer}
+          onProcess={handlePasteProcess}
+        />
+        )}
+      </>
+      ) : (
+      <>
       <div style={{ ...groupBox(false), marginBottom:16, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
         <div>
           <div style={{ fontSize:14, fontWeight:500, color:t.t1, marginBottom:4 }}>Download import template</div>
@@ -1306,6 +1670,8 @@ export default function BulkUpload({ onToast }) {
           ))}
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

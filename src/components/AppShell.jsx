@@ -26,7 +26,7 @@ const NAV = [
   {
     group: 'Automations',
     items: [
-      { label: 'ERP Price Export', icon: IconFileExport, path: '/apps/others/erp-export' },
+      { label: 'ERP Automation',   icon: IconFileExport, path: '/apps/others/erp-export' },
       { label: 'Global Markup',    icon: IconPercent,    path: '/apps/others/global-markup' },
     ],
   },

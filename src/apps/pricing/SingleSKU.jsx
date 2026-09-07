@@ -7,7 +7,7 @@ import { calcAllMargins, suggestKSAPrice, suggestQATPrice, suggestUAEPrice, calc
 import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead, segDiv, CURRENCIES, SOURCES, PRICE_USED_OPTIONS } from './styles';
 import BrandSelect from './BrandSelect';
 import { useAuth } from '../../lib/AuthContext';
-import { downloadCSV } from '../../lib/csvExport';
+import { downloadXLSX } from '../../lib/xlsxExport';
 
 // ── ROOT ──────────────────────────────────────────────────────
 const BLANK = {
@@ -100,7 +100,7 @@ export default function SingleSKU({ rates, brands, editTarget, onEditTargetConsu
       updated_at:              selected.updated_at ?? '',
       updated_by:              selected.updated_by ?? '',
     };
-    downloadCSV([row], `${selected.item_code}_${today}.csv`);
+    downloadXLSX([row], `${selected.item_code}_${today}.xlsx`);
   };
 
   return (
@@ -266,7 +266,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
     if (form.uae_overridden) return;
     if (!form.price_used) return;
     if (form.price_used === 'cost_based') {
-      const msrps = calcCostBasedMSRPs(pf(form.exw_cost), form.cost_currency, hasVal(form.target_margin_pct) ? pf(form.target_margin_pct) : DEFAULT_COST_MARGIN_PCT, rates);
+      const msrps = calcCostBasedMSRPs(pf(form.exw_cost), form.cost_currency, hasVal(form.target_margin_pct) ? pf(form.target_margin_pct) : DEFAULT_COST_MARGIN_PCT, rates, additionalMarkup ?? null);
       if (!msrps) return;
       setForm(f => ({
         ...f,
@@ -330,7 +330,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
     if (viewMode) return;
     if (!form.price_used) return;
     if (form.price_used === 'cost_based') {
-      const msrps = calcCostBasedMSRPs(pf(form.exw_cost), form.cost_currency, hasVal(form.target_margin_pct) ? pf(form.target_margin_pct) : DEFAULT_COST_MARGIN_PCT, rates);
+      const msrps = calcCostBasedMSRPs(pf(form.exw_cost), form.cost_currency, hasVal(form.target_margin_pct) ? pf(form.target_margin_pct) : DEFAULT_COST_MARGIN_PCT, rates, additionalMarkup ?? null);
       if (!msrps) return;
       setForm(f => {
         const effectiveAed = f.uae_overridden ? f.msrp_aed : msrps.msrp_aed;

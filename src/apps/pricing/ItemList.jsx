@@ -4,7 +4,8 @@ import { calcAllMargins, calcEmployeePrice, formatMargin, MARGIN_COLORS } from '
 import { t, inp, sel, btnW, btnG, btnSm, lbl, PRICE_USED_OPTIONS } from './styles';
 import { useAuth } from '../../lib/AuthContext';
 import BrandSelect from './BrandSelect';
-import { downloadCSV, flattenItem, downloadPostgRESTCSV } from '../../lib/csvExport';
+import { flattenItem, downloadFullTableXLSX } from '../../lib/csvExport';
+import { downloadXLSX } from '../../lib/xlsxExport';
 
 const MARGIN_RANGES = [
   { label:'All margins',  min:null, max:null },
@@ -256,6 +257,29 @@ function InlineSummary({ item, rates }) {
   );
 }
 
+// key: null marks a column computed client-side (from _margins or resolveMSRP),
+// which the server can't order by — those headers stay inert.
+const LIST_COLUMNS = [
+  { label:'Item code',   key:'item_code',         minWidth:160 },
+  { label:'Name',        key:'item_name',         minWidth:240 },
+  { label:'Barcode',     key:'barcode',           minWidth:130 },
+  { label:'MSRP used',   key:null,                minWidth:120, align:'right' },
+  { label:'Price curr.', key:null,                minWidth:90 },
+  { label:'EXW cost',    key:'exw_cost',          minWidth:110, align:'right' },
+  { label:'Cost curr.',  key:'cost_currency',     minWidth:90 },
+  { label:'UAE price',   key:'msrp_aed',          minWidth:130, align:'right' },
+  { label:'KSA price',   key:'msrp_sar',          minWidth:130, align:'right' },
+  { label:'QAT price',   key:'msrp_qat',          minWidth:130, align:'right' },
+  { label:'Ship %',      key:'shipping_rate',     minWidth:80,  align:'right' },
+  { label:'Duty %',      key:'customs_duty_rate', minWidth:80,  align:'right' },
+  { label:'Landed cost', key:null,                minWidth:130, align:'right' },
+  { label:'UAE margin',  key:null,                minWidth:110, align:'right' },
+  { label:'Price src.',  key:'price_source',      minWidth:100 },
+  { label:'Cost src.',   key:'cost_source',       minWidth:100 },
+  { label:'Created',     key:'created_at',        minWidth:130 },
+  { label:'Last edited', key:'updated_at',        minWidth:130 },
+];
+
 // ── ITEM LIST ─────────────────────────────────────────────────
 export default function ItemList({ rates, brands, onEditItem, maximized, setExportActions, isActive, refreshKey }) {
   const { isViewer } = useAuth();
@@ -271,13 +295,17 @@ export default function ItemList({ rates, brands, onEditItem, maximized, setExpo
   const [contextMenu,    setContextMenu]    = useState(null);
   const [expanded,       setExpanded]       = useState(new Set());
   const [exportingAll,   setExportingAll]   = useState(false);
+  const [sortCol,        setSortCol]        = useState('item_code');
+  const [sortDir,        setSortDir]        = useState('asc');
 
   const PAGE_SIZE = 100;
 
-  const loadItems = async (pg=0) => {
+  // Sorting is server-side: the list pages in 100 at a time and accumulates, so
+  // sorting the loaded rows alone would only order the slice already fetched.
+  const loadItems = async (pg=0, sc=sortCol, sd=sortDir) => {
     setLoading(true); setError(null);
     try {
-      const { data, count } = await fetchItemList({ brandCode:brandFilter||undefined, search:search||undefined, page:pg, pageSize:PAGE_SIZE });
+      const { data, count } = await fetchItemList({ brandCode:brandFilter||undefined, search:search||undefined, page:pg, pageSize:PAGE_SIZE, sortCol:sc, sortDir:sd });
       const withMargins = data.map(item => ({
         ...item,
         _margins: (()=>{ try{ return calcAllMargins(item,rates); } catch{ return null; } })(),
@@ -297,6 +325,17 @@ export default function ItemList({ rates, brands, onEditItem, maximized, setExpo
     finally { setLoading(false); }
   };
 
+  // Dates and numbers are most useful newest/highest first, so they open desc;
+  // text columns open asc.
+  const handleSort = (col) => {
+    const nextDir = sortCol === col
+      ? (sortDir === 'asc' ? 'desc' : 'asc')
+      : (['created_at','updated_at','exw_cost','msrp_aed','msrp_sar','msrp_qat'].includes(col) ? 'desc' : 'asc');
+    setSortCol(col); setSortDir(nextDir);
+    setExpanded(new Set());
+    loadItems(0, col, nextDir);
+  };
+
   useEffect(() => {
     if (!setExportActions || !isActive) return;
     if (!loaded || rows.length === 0) { setExportActions([]); return; }
@@ -304,17 +343,17 @@ export default function ItemList({ rates, brands, onEditItem, maximized, setExpo
     setExportActions([
       {
         label: `Export visible (${rows.length})`,
-        onClick: () => downloadCSV(rows.map(flattenItem), `items_visible_${today}.csv`),
+        onClick: () => downloadXLSX(rows.map(flattenItem), `items_visible_${today}.xlsx`),
       },
       {
         label: exportingAll ? 'Exporting…' : total ? `Export all (${total.toLocaleString()})` : 'Export all',
         onClick: () => {
           if (exportingAll) return;
           setExportingAll(true);
-          downloadPostgRESTCSV({
+          downloadFullTableXLSX({
             table: 'pricing_master',
             filters: { brandCode: brandFilter || undefined, search: search || undefined },
-            filename: `items_all_${today}.csv`,
+            filename: `items_all_${today}.xlsx`,
           }).catch(e => console.error('Export failed:', e)).finally(() => setExportingAll(false));
         },
       },
@@ -363,7 +402,7 @@ export default function ItemList({ rates, brands, onEditItem, maximized, setExpo
           </div>
           <div>
             <label style={lbl}>Search</label>
-            <input style={inp(!!search,false)} placeholder="Item code or name..." value={search}
+            <input style={inp(!!search,false)} placeholder="Item code or name — A//B for several" value={search}
               onChange={e=>setSearch(e.target.value)} onKeyDown={handleKeyDown}/>
           </div>
           <div>
@@ -410,23 +449,25 @@ export default function ItemList({ rates, brands, onEditItem, maximized, setExpo
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
               <thead>
                 <tr>
-                  <th style={{ ...thStyle, position:'sticky', left:0, zIndex:3, minWidth:160 }}>Item code</th>
-                  <th style={{ ...thStyle, minWidth:240 }}>Name</th>
-                  <th style={{ ...thStyle, minWidth:130 }}>Barcode</th>
-                  <th style={{ ...thStyle, minWidth:120, textAlign:'right' }}>MSRP used</th>
-                  <th style={{ ...thStyle, minWidth:90 }}>Price curr.</th>
-                  <th style={{ ...thStyle, minWidth:110, textAlign:'right' }}>EXW cost</th>
-                  <th style={{ ...thStyle, minWidth:90 }}>Cost curr.</th>
-                  <th style={{ ...thStyle, minWidth:130, textAlign:'right' }}>UAE price</th>
-                  <th style={{ ...thStyle, minWidth:130, textAlign:'right' }}>KSA price</th>
-                  <th style={{ ...thStyle, minWidth:130, textAlign:'right' }}>QAT price</th>
-                  <th style={{ ...thStyle, minWidth:80,  textAlign:'right' }}>Ship %</th>
-                  <th style={{ ...thStyle, minWidth:80,  textAlign:'right' }}>Duty %</th>
-                  <th style={{ ...thStyle, minWidth:130, textAlign:'right' }}>Landed cost</th>
-                  <th style={{ ...thStyle, minWidth:110, textAlign:'right' }}>UAE margin</th>
-                  <th style={{ ...thStyle, minWidth:100 }}>Price src.</th>
-                  <th style={{ ...thStyle, minWidth:100 }}>Cost src.</th>
-                  <th style={{ ...thStyle, minWidth:130 }}>Last edited</th>
+                  {LIST_COLUMNS.map((c, ci) => {
+                    const active = c.key && sortCol === c.key;
+                    return (
+                      <th key={c.label}
+                        onClick={c.key ? () => handleSort(c.key) : undefined}
+                        title={c.key ? `Sort by ${c.label}` : 'Calculated column — not sortable'}
+                        style={{
+                          ...thStyle, minWidth:c.minWidth,
+                          ...(c.align ? { textAlign:c.align } : {}),
+                          ...(ci===0 ? { position:'sticky', left:0, zIndex:3 } : {}),
+                          cursor: c.key ? 'pointer' : 'default',
+                          userSelect: 'none',
+                          color: active ? t.blue : undefined,
+                        }}>
+                        {c.label}
+                        {active && <span style={{ marginLeft:4, fontSize:9 }}>{sortDir==='asc'?'↑':'↓'}</span>}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -461,6 +502,7 @@ export default function ItemList({ rates, brands, onEditItem, maximized, setExpo
                         <td style={{ ...td(false), textAlign:'right', color:MARGIN_COLORS[m.status], fontWeight:600 }}>{m.label}</td>
                         <td style={{ ...td(false), color:t.t3 }}>{item.price_source||'—'}</td>
                         <td style={{ ...td(false), color:t.t3 }}>{item.cost_source||'—'}</td>
+                        <td style={{ ...td(false), color:t.t4, fontSize:12 }}>{fmtDate(item.created_at)}</td>
                         <td style={{ ...td(false), color:t.t4, fontSize:12 }}>
                           {fmtDate(item.updated_at)}
                           {item.updated_by&&<span style={{ display:'block', fontSize:11, color:t.t4, marginTop:2 }}>{item.updated_by.split('@')[0]}</span>}
@@ -495,7 +537,7 @@ export default function ItemList({ rates, brands, onEditItem, maximized, setExpo
           isExpanded={expanded.has(contextMenu.item.item_code)}
           onEdit={()=>onEditItem(contextMenu.item)}
           onToggleSummary={()=>toggleExpanded(contextMenu.item.item_code)}
-          onExportItem={()=>{ downloadCSV([flattenItem(contextMenu.item)], `${contextMenu.item.item_code}.csv`); setContextMenu(null); }}
+          onExportItem={()=>{ downloadXLSX([flattenItem(contextMenu.item)], `${contextMenu.item.item_code}.xlsx`); setContextMenu(null); }}
           onDismiss={()=>setContextMenu(null)}
           isViewer={isViewer}
         />

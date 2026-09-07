@@ -1,17 +1,31 @@
-﻿import { supabase, supabaseUrl, supabaseAnonKey } from './supabase';
+import { supabase, supabaseUrl, supabaseAnonKey } from './supabase';
 import { DEMO } from '../demo/demoConfig';
+import { orExpression, matchesSearch } from './search';
+import { downloadXLSX } from './xlsxExport';
+
+// Barcode values are long numeric strings — wrap in Excel text formula so they
+// aren't auto-converted to numbers or scientific notation when opened in Excel.
+const barcodeCell = (v) => {
+  const s = String(v ?? '');
+  return s ? `="${s}"` : '';
+};
+
+const escapeCell = (h, v) => {
+  if (h === 'barcode') return barcodeCell(v);
+  const s = String(v ?? '');
+  return s.includes(',') || s.includes('"') || s.includes('\n')
+    ? `"${s.replace(/"/g, '""')}"` : s;
+};
 
 export function downloadCSV(rows, filename) {
   if (!rows?.length) return;
   const headers = Object.keys(rows[0]);
-  const escape = v => {
-    const s = String(v ?? '');
-    return s.includes(',') || s.includes('"') || s.includes('\n')
-      ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const lines = [headers.join(','), ...rows.map(row => headers.map(h => escape(row[h])).join(','))];
-  // '\ufeff' = UTF-8 BOM — required for Excel on Windows to auto-detect UTF-8 encoding
-  const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const lines = [
+    headers.join(','),
+    ...rows.map(row => headers.map(h => escapeCell(h, row[h])).join(',')),
+  ];
+  // '﻿' = UTF-8 BOM — required for Excel on Windows to auto-detect UTF-8 encoding
+  const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
   triggerDownload(blob, filename);
 }
 
@@ -29,20 +43,22 @@ export function flattenItem(item) {
   };
 }
 
-// Uses PostgREST's Accept: text/csv to stream a full-table export from the server.
-// Requires Supabase project's max_rows to be set high enough (or removed) for large tables.
-export async function downloadPostgRESTCSV({ table, filters = {}, filename }) {
-  // Demo mode: build the full export client-side from the in-memory store.
+// Full-table export. Pulls JSON pages straight from PostgREST and writes an xlsx
+// so identifier columns can be typed as text — the previous CSV path could only
+// request that via an ="…" formula, which Excel applied inconsistently.
+// Paginated with Range headers because PostgREST caps any single response at the
+// project's max_rows (1000 by default) — without this it silently truncates.
+const PAGE = 1000;
+
+export async function downloadFullTableXLSX({ table, filters = {}, filename }) {
+  // Demo mode: build the export from the in-memory store.
   if (DEMO) {
     const { store } = await import('../demo/demoData');
     let rows = [...store.pricingMaster];
     if (filters.brandCode) rows = rows.filter(r => r.brand_code === filters.brandCode);
-    if (filters.search?.trim()) {
-      const q = filters.search.trim().toLowerCase();
-      rows = rows.filter(r => r.item_code.toLowerCase().includes(q) || (r.item_name || '').toLowerCase().includes(q));
-    }
+    if (filters.search?.trim()) rows = rows.filter(r => matchesSearch(r, filters.search));
     rows.sort((a, b) => a.item_code.localeCompare(b.item_code));
-    downloadCSV(rows, filename);
+    downloadXLSX(rows, filename);
     return;
   }
 
@@ -51,26 +67,39 @@ export async function downloadPostgRESTCSV({ table, filters = {}, filename }) {
   params.set('order', 'item_code');
   if (filters.brandCode) params.set('brand_code', `eq.${filters.brandCode}`);
   if (filters.search?.trim()) {
-    // PostgREST uses * (not %) as the ilike wildcard in URL params
-    // Escape ) and , so they don't break the or() clause syntax
-    const q = filters.search.trim().replace(/[(),]/g, '\\$&');
-    params.set('or', `(item_code.ilike.*${q.toUpperCase()}*,item_name.ilike.*${q}*)`);
+    // PostgREST uses * (not %) as the ilike wildcard in raw URL params
+    params.set('or', `(${orExpression(filters.search, '*')})`);
   }
-  const response = await fetch(`${supabaseUrl}/rest/v1/${table}?${params}`, {
-    headers: {
-      'apikey':        supabaseAnonKey,
-      'Authorization': `Bearer ${session?.access_token ?? supabaseAnonKey}`,
-      'Accept':        'text/csv',
-      'Prefer':        'count=none',
-    },
-  });
-  if (!response.ok) throw new Error(`Export failed: ${response.statusText}`);
-  // Prepend UTF-8 BOM so Excel on Windows auto-detects encoding (server doesn't add one)
-  const csvText = await response.text();
-  const blob = new Blob(['\ufeff' + csvText], { type: 'text/csv;charset=utf-8;' });
-  triggerDownload(blob, filename);
-}
 
+  const url = `${supabaseUrl}/rest/v1/${table}?${params}`;
+  const all = [];
+  let offset = 0;
+
+  while (true) {
+    const response = await fetch(url, {
+      headers: {
+        'apikey':        supabaseAnonKey,
+        'Authorization': `Bearer ${session?.access_token ?? supabaseAnonKey}`,
+        'Accept':        'application/json',
+        'Range-Unit':    'items',
+        'Range':         `${offset}-${offset + PAGE - 1}`,
+        'Prefer':        'count=none',
+      },
+    });
+    // 416 = offset past the end of the result set; nothing left to fetch.
+    if (response.status === 416) break;
+    if (!response.ok) throw new Error(`Export failed: ${response.statusText}`);
+
+    const batch = await response.json();
+    if (!Array.isArray(batch) || batch.length === 0) break;
+    all.push(...batch);
+    // Advance by rows actually returned — a max_rows below PAGE shrinks the
+    // stride rather than ending the loop early.
+    offset += batch.length;
+  }
+
+  downloadXLSX(all, filename);
+}
 function triggerDownload(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

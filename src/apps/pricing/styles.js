@@ -1,4 +1,4 @@
-export const CURRENCIES = ['EUR','USD','GBP','AUD','JPY'];
+export const CURRENCIES = ['EUR','USD','GBP','AUD','JPY','AED','SAR','QAR'];
 export const SOURCES    = ['Portal','File','Website','Invoice','Estimate'];
 export const PRICE_USED_OPTIONS = [
   { value:'primary_ex_vat',    label:'Primary w/o VAT',   needs:'msrp_primary_ex_vat' },

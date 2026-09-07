@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { fetchProjectItems, saveProjectItem, deleteProjectItem } from '../../lib/db';
-import { calcProjectPrice, formatMargin, MARGIN_COLORS, suggestKSAPrice, suggestQATPrice } from '../../lib/pricing';
+import { fetchProjectItems, saveProjectItem, deleteProjectItem, bulkUpdateProjectItems } from '../../lib/db';
+import { calcProjectPrice, formatMargin, MARGIN_COLORS, suggestKSAPrice, suggestQATPrice, DEFAULT_PROJECT_MARGIN_PCT } from '../../lib/pricing';
+import { BulkEditBar, BulkEditModal } from './ProjectBulkEdit';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead } from './styles';
 import { downloadCSV } from '../../lib/csvExport';
 
@@ -12,6 +13,21 @@ import { useAuth } from '../../lib/AuthContext';
 // Strip commas from Excel-formatted numbers
 const pf = (v) => parseFloat(String(v ?? '').replace(/,/g, ''));
 const hasVal = (v) => v !== '' && v !== null && v !== undefined && !isNaN(pf(v)) && pf(v) !== 0;
+
+// ── FORM CACHE (cost_currency + shipping_rate, 1h TTL) ───────
+const FORM_CACHE_KEY = 'prjt_form_defaults';
+const readFormCache = () => {
+  try {
+    const raw = sessionStorage.getItem(FORM_CACHE_KEY);
+    if (!raw) return null;
+    const { v, exp } = JSON.parse(raw);
+    if (Date.now() > exp) { sessionStorage.removeItem(FORM_CACHE_KEY); return null; }
+    return v;
+  } catch { return null; }
+};
+const writeFormCache = (cost_currency, shipping_rate) => {
+  try { sessionStorage.setItem(FORM_CACHE_KEY, JSON.stringify({ v: { cost_currency, shipping_rate }, exp: Date.now() + 3600000 })); } catch {}
+};
 
 // ── SELECT INDICATOR ─────────────────────────────────────────
 function SelectDot({ checked }) {
@@ -38,6 +54,7 @@ const BLANK = {
   cost_currency:     'EUR',
   shipping_rate:     '0',
   customs_duty_rate: '5.5',
+  target_margin_pct: String(DEFAULT_PROJECT_MARGIN_PCT),
   uae_overridden:    false,
   ksa_overridden:    false,
   qat_overridden:    false,
@@ -47,6 +64,21 @@ const BLANK = {
   msrp_qat:          '',
 };
 
+// ── SORT HEADERS ─────────────────────────────────────────────
+const SORT_HEADERS = [
+  { label: 'Item code',     key: 'item_code' },
+  { label: 'Name',          key: 'project_item_name' },
+  { label: 'Cost',          key: 'cost' },
+  { label: 'Inc VAT (AED)', key: 'msrp_aed_inc_vat' },
+  { label: 'Ex VAT (AED)', key: 'msrp_aed_ex_vat' },
+  { label: 'KSA (SAR)',    key: 'msrp_sar' },
+  { label: 'QAT (QAR)',   key: 'msrp_qat' },
+  { label: 'Margin',      key: 'target_margin_pct' },
+  { label: '',             key: null },
+];
+
+const GRID_COLS = '32px 145px 1fr 105px 125px 115px 110px 110px 80px auto';
+
 // ── ROOT ──────────────────────────────────────────────────────
 export default function ProjectItems({ rates, setExportActions, onToast, isActive, refreshKey }) {
   const { isViewer }                  = useAuth();
@@ -55,6 +87,10 @@ export default function ProjectItems({ rates, setExportActions, onToast, isActiv
   const [showForm,      setShowForm]  = useState(false);
   const [editItem,      setEditItem]  = useState(null);
   const [selectedCodes, setSelectedCodes] = useState(new Set());
+  const [sortCol,       setSortCol]       = useState('created_at');
+  const [sortDir,       setSortDir]       = useState('desc');
+  const [bulkOpen,      setBulkOpen]      = useState(false);
+  const [bulkSaving,    setBulkSaving]    = useState(false);
 
   const load = useCallback(async () => {
     try { setLoading(true); setItems(await fetchProjectItems()); }
@@ -69,13 +105,19 @@ export default function ProjectItems({ rates, setExportActions, onToast, isActiv
       cost_currency:     item.cost_currency,
       shipping_rate:     item.shipping_rate,
       customs_duty_rate: item.customs_duty_rate,
+      target_margin_pct: item.target_margin_pct,
     }, rates) : null;
     const landedAED = result?.landed_cost_aed ?? null;
     const exVat     = item.msrp_aed_ex_vat;
     const margin    = (exVat > 0 && landedAED > 0)
       ? parseFloat(((exVat - landedAED) / exVat * 100).toFixed(2))
       : null;
-    return { ...item, landed_cost_aed: landedAED, gross_margin_pct: margin };
+    return {
+      ...item,
+      target_margin_pct: item.target_margin_pct ?? DEFAULT_PROJECT_MARGIN_PCT,
+      landed_cost_aed:   landedAED,
+      gross_margin_pct:  margin,
+    };
   };
 
   useEffect(() => {
@@ -108,6 +150,34 @@ export default function ProjectItems({ rates, setExportActions, onToast, isActiv
 
   const handleEdit = (item) => { setEditItem(item); setShowForm(true); };
 
+  // Recompute each selected item from its merged cost inputs, leaving any
+  // market the row has manually overridden exactly as the user set it.
+  const handleBulkApply = async (rows) => {
+    setBulkSaving(true);
+    try {
+      const updates = rows.map(({ item, merged, priced }) => {
+        const exVat = item.uae_overridden ? item.msrp_aed_ex_vat : (priced?.msrp_aed_ex_vat ?? null);
+        return {
+          item_code:         item.item_code,
+          shipping_rate:     merged.shipping_rate,
+          customs_duty_rate: merged.customs_duty_rate,
+          target_margin_pct: merged.target_margin_pct,
+          msrp_aed_inc_vat:  item.uae_overridden ? item.msrp_aed_inc_vat : (priced?.msrp_aed_inc_vat ?? null),
+          msrp_aed_ex_vat:   exVat,
+          msrp_sar: item.ksa_overridden ? item.msrp_sar : (exVat > 0 ? parseFloat((suggestKSAPrice(exVat) || 0).toFixed(2)) : null),
+          msrp_qat: item.qat_overridden ? item.msrp_qat : (exVat > 0 ? parseFloat((suggestQATPrice(exVat) || 0).toFixed(2)) : null),
+        };
+      });
+      await bulkUpdateProjectItems(updates);
+      setBulkOpen(false);
+      setSelectedCodes(new Set());
+      onToast?.(`Updated ${updates.length} item${updates.length !== 1 ? 's' : ''}`);
+      await load();
+    } catch(e) {
+      onToast?.(e.message || 'Bulk update failed', false);
+    } finally { setBulkSaving(false); }
+  };
+
   const handleDelete = async (code) => {
     if (!window.confirm(`Delete ${code}? This cannot be undone.`)) return;
     try {
@@ -133,12 +203,26 @@ export default function ProjectItems({ rates, setExportActions, onToast, isActiv
     if (item) handleEdit(item);
   };
 
+  const handleSortClick = (col) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  };
+
+  const sortedItems = [...items].sort((a, b) => {
+    const dir = sortDir === 'asc' ? 1 : -1;
+    if (sortCol === 'item_code' || sortCol === 'project_item_name')
+      return dir * (a[sortCol] || '').localeCompare(b[sortCol] || '');
+    if (sortCol === 'created_at')
+      return dir * (new Date(a.created_at || 0) - new Date(b.created_at || 0));
+    return dir * ((a[sortCol] || 0) - (b[sortCol] || 0));
+  });
+
   return (
     <div>
       {/* Header */}
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
         <p style={{ fontSize:13, color:t.t3, margin:0 }}>
-          Cost-driven pricing — PRJT brand · fixed 25% gross margin target · no brand markup applied.
+          Cost-driven pricing — PRJT brand · {DEFAULT_PROJECT_MARGIN_PCT}% default margin on landed cost, adjustable per item · no brand markup applied.
         </p>
         {!showForm && (
           <button
@@ -171,6 +255,29 @@ export default function ProjectItems({ rates, setExportActions, onToast, isActiv
         )}
       </AnimatePresence>
 
+      {/* Bulk edit */}
+      {!showForm && selectedCodes.size > 0 && (
+        <BulkEditBar
+          count={selectedCodes.size}
+          disabled={isViewer}
+          onEdit={() => setBulkOpen(true)}
+          onClear={() => setSelectedCodes(new Set())}
+        />
+      )}
+      {/* Mounted directly rather than through AnimatePresence: applying an edit
+          clears the selection while the modal is closing, and an exit animation
+          racing that state change can strand the overlay in the DOM at opacity 0,
+          where it still swallows clicks. */}
+      {bulkOpen && (
+        <BulkEditModal
+          items={items.filter(i => selectedCodes.has(i.item_code))}
+          rates={rates}
+          saving={bulkSaving}
+          onClose={() => setBulkOpen(false)}
+          onApply={handleBulkApply}
+        />
+      )}
+
       {/* List */}
       {!showForm && (
         loading ? (
@@ -185,7 +292,7 @@ export default function ProjectItems({ rates, setExportActions, onToast, isActiv
             {/* Table header */}
             <div style={{
               display:'grid',
-              gridTemplateColumns:'32px 150px 1fr 120px 130px 120px 120px 120px auto',
+              gridTemplateColumns:GRID_COLS,
               padding:'10px 20px', background:t.bg1, borderBottom:`1px solid ${t.b1}`,
               alignItems:'center',
             }}>
@@ -199,15 +306,25 @@ export default function ProjectItems({ rates, setExportActions, onToast, isActiv
               >
                 <SelectDot checked={selectedCodes.size === items.length && items.length > 0} />
               </div>
-              {['Item code','Name','Cost','Inc VAT (AED)','Ex VAT (AED)','KSA (SAR)','QAT (QAR)',''].map((h, i) => (
-                <span key={i} style={{
-                  fontSize:10, color:t.t4, textTransform:'uppercase',
-                  letterSpacing:'0.07em', fontFamily:'var(--font-mono)',
-                }}>{h}</span>
+              {SORT_HEADERS.map((h, i) => (
+                <span key={i}
+                  onClick={h.key ? () => handleSortClick(h.key) : undefined}
+                  style={{
+                    fontSize:10, color: (sortCol === h.key && h.key) ? t.blue : t.t4,
+                    textTransform:'uppercase', letterSpacing:'0.07em', fontFamily:'var(--font-mono)',
+                    cursor: h.key ? 'pointer' : 'default', userSelect:'none',
+                    display:'flex', alignItems:'center', gap:3,
+                  }}
+                >
+                  {h.label}
+                  {sortCol === h.key && h.key && (
+                    <span style={{ fontSize:9, lineHeight:1 }}>{sortDir === 'asc' ? '↑' : '↓'}</span>
+                  )}
+                </span>
               ))}
             </div>
 
-            {items.map((item, i) => {
+            {sortedItems.map((item, i) => {
               const isSelected = selectedCodes.has(item.item_code);
               const toggleRow = () => setSelectedCodes(prev => {
                 const next = new Set(prev);
@@ -217,9 +334,9 @@ export default function ProjectItems({ rates, setExportActions, onToast, isActiv
               return (
                 <div key={item.item_code} style={{
                   display:'grid',
-                  gridTemplateColumns:'32px 150px 1fr 120px 130px 120px 120px 120px auto',
+                  gridTemplateColumns:GRID_COLS,
                   padding:'12px 20px',
-                  borderBottom: i < items.length - 1 ? `1px solid ${t.b1}` : 'none',
+                  borderBottom: i < sortedItems.length - 1 ? `1px solid ${t.b1}` : 'none',
                   alignItems:'center', transition:'background 0.1s',
                   cursor:'pointer',
                   background: isSelected ? 'rgba(77,159,255,0.06)' : 'transparent',
@@ -254,6 +371,9 @@ export default function ProjectItems({ rates, setExportActions, onToast, isActiv
                     {item.msrp_qat ? `QAR ${Number(item.msrp_qat).toFixed(2)}` : '—'}
                     {item.qat_overridden && <span style={{ fontSize:9, color:t.amber, marginLeft:4 }}>↑</span>}
                   </span>
+                  <span style={{ fontSize:12, color:t.t3, fontFamily:'var(--font-mono)' }}>
+                    {item.target_margin_pct ?? DEFAULT_PROJECT_MARGIN_PCT}%
+                  </span>
                   <div style={{ display:'flex', gap:6 }} onClick={e => e.stopPropagation()}>
                     <button style={{ ...btnG, ...btnSm }} onClick={() => handleEdit(item)}>Edit</button>
                     {!isViewer && (
@@ -285,6 +405,7 @@ function ProjectItemForm({ rates, existing, existingCodes, onSave, onFail, onCan
     cost_currency:     item.cost_currency || 'EUR',
     shipping_rate:     item.shipping_rate ?? '0',
     customs_duty_rate: item.customs_duty_rate ?? '5.5',
+    target_margin_pct: item.target_margin_pct ?? String(DEFAULT_PROJECT_MARGIN_PCT),
     uae_overridden:    item.uae_overridden ?? false,
     ksa_overridden:    item.ksa_overridden ?? false,
     qat_overridden:    item.qat_overridden ?? false,
@@ -294,7 +415,11 @@ function ProjectItemForm({ rates, existing, existingCodes, onSave, onFail, onCan
     msrp_qat:          item.msrp_qat ?? '',
   } : { ...BLANK };
 
-  const [form,          setForm]          = useState(() => toForm(existing));
+  const [form, setForm] = useState(() => {
+    if (existing) return toForm(existing);
+    const cache = readFormCache();
+    return cache ? { ...BLANK, cost_currency: cache.cost_currency, shipping_rate: cache.shipping_rate } : { ...BLANK };
+  });
   const [fieldErrs,     setFieldErrs]     = useState({});
   const [saving,        setSaving]        = useState(false);
   const [modal,         setModal]         = useState(null);
@@ -323,6 +448,7 @@ function ProjectItemForm({ rates, existing, existingCodes, onSave, onFail, onCan
       cost_currency:     form.cost_currency,
       shipping_rate:     pf(form.shipping_rate) || 0,
       customs_duty_rate: pf(form.customs_duty_rate) ?? 5.5,
+      target_margin_pct: pf(form.target_margin_pct) || DEFAULT_PROJECT_MARGIN_PCT,
     }, rates);
     if (result) {
       setForm(f => ({
@@ -331,7 +457,7 @@ function ProjectItemForm({ rates, existing, existingCodes, onSave, onFail, onCan
         msrp_aed_ex_vat:  result.msrp_aed_ex_vat,
       }));
     }
-  }, [form.cost, form.cost_currency, form.shipping_rate, form.customs_duty_rate, form.uae_overridden, rates]);
+  }, [form.cost, form.cost_currency, form.shipping_rate, form.customs_duty_rate, form.target_margin_pct, form.uae_overridden, rates]);
 
   // ── Auto-suggest SAR/QAT from AED ex_vat whenever it changes ──
   useEffect(() => {
@@ -363,6 +489,10 @@ function ProjectItemForm({ rates, existing, existingCodes, onSave, onFail, onCan
     if (exVat > 0) setForm(f => ({ ...f, msrp_qat: parseFloat((suggestQATPrice(exVat) || 0).toFixed(2)) }));
   }, [form.qat_overridden]); // intentional: msrp_aed_ex_vat omitted — handled by suggestion effect above
 
+  useEffect(() => {
+    if (!existing) writeFormCache(form.cost_currency, form.shipping_rate);
+  }, [form.cost_currency, form.shipping_rate]); // existing is stable for the component's lifetime
+
   // ── Derived display values ──────────────────────────────────
   const costVal    = pf(form.cost);
   const incVatVal  = pf(form.msrp_aed_inc_vat);
@@ -377,6 +507,7 @@ function ProjectItemForm({ rates, existing, existingCodes, onSave, onFail, onCan
         cost_currency:     form.cost_currency,
         shipping_rate:     pf(form.shipping_rate) || 0,
         customs_duty_rate: pf(form.customs_duty_rate) ?? 5.5,
+        target_margin_pct: pf(form.target_margin_pct) || DEFAULT_PROJECT_MARGIN_PCT,
       }, rates)
     : null;
 
@@ -399,6 +530,8 @@ function ProjectItemForm({ rates, existing, existingCodes, onSave, onFail, onCan
     if (!form.sku_suffix?.trim())                       fe.sku_suffix     = true;
     if (!costVal || isNaN(costVal) || costVal <= 0)     fe.cost           = true;
     if (!form.cost_currency)                            fe.cost_currency  = true;
+    const mg = pf(form.target_margin_pct);
+    if (!(mg > 0 && mg < 100))                          fe.target_margin_pct = true;
     return fe;
   };
 
@@ -427,6 +560,7 @@ function ProjectItemForm({ rates, existing, existingCodes, onSave, onFail, onCan
         cost_currency:     form.cost_currency,
         shipping_rate:     pf(form.shipping_rate) || 0,
         customs_duty_rate: pf(form.customs_duty_rate) ?? 5.5,
+        target_margin_pct: pf(form.target_margin_pct) || DEFAULT_PROJECT_MARGIN_PCT,
         msrp_aed_inc_vat:  incVat || null,
         msrp_aed_ex_vat:   exVat  || null,
         msrp_sar:          pf(form.msrp_sar) || null,
@@ -579,6 +713,17 @@ function ProjectItemForm({ rates, existing, existingCodes, onSave, onFail, onCan
               </div>
             </div>
 
+            <div style={fg}>
+              <label style={lbl}>
+                Target margin (%) <span style={{ color:t.t4, fontWeight:400, textTransform:'none', letterSpacing:0 }}>
+                  default {DEFAULT_PROJECT_MARGIN_PCT}
+                </span>
+              </label>
+              <input {...I('target_margin_pct', fieldErrs.target_margin_pct)} type="text" inputMode="decimal"
+                placeholder={String(DEFAULT_PROJECT_MARGIN_PCT)} />
+              <span style={sub}>Gross margin enforced on landed cost — shipping and customs included</span>
+            </div>
+
             {showNudge && (
               <div style={{
                 background:'rgba(245,166,35,0.07)', border:'1px solid rgba(245,166,35,0.25)',
@@ -694,7 +839,7 @@ function ProjectItemForm({ rates, existing, existingCodes, onSave, onFail, onCan
                   onClick={() => set('uae_overridden', !form.uae_overridden)}
                 >{form.uae_overridden ? 'Revert' : 'Override'}</button>
               </div>
-              <span style={sub}>25% gross margin target · override to set manually</span>
+              <span style={sub}>{pf(form.target_margin_pct) || DEFAULT_PROJECT_MARGIN_PCT}% margin on landed cost · override to set manually</span>
               {hasVal(form.msrp_aed_ex_vat) && (
                 <span style={{ ...sub, color:t.t3, marginTop:4 }}>Ex VAT: AED {exVatVal.toFixed(2)}</span>
               )}
@@ -806,6 +951,7 @@ function ProjectItemForm({ rates, existing, existingCodes, onSave, onFail, onCan
               ['Cost',             `${form.cost_currency} ${costVal ? costVal.toLocaleString() : '—'}`],
               ['Shipping',         `${pf(form.shipping_rate) || 0}%`],
               ['Customs duty',     `${pf(form.customs_duty_rate) ?? 5.5}%`],
+              ['Target margin',    `${pf(form.target_margin_pct) || DEFAULT_PROJECT_MARGIN_PCT}%`],
               ['Landed cost',      landedAED ? `AED ${landedAED.toFixed(2)}` : '—'],
               ['UAE inc VAT',  hasVal(form.msrp_aed_inc_vat) ? `AED ${incVatVal.toLocaleString()}` : '—'],
               ['UAE ex VAT',   hasVal(form.msrp_aed_ex_vat)  ? `AED ${exVatVal.toFixed(2)}`       : '—'],
