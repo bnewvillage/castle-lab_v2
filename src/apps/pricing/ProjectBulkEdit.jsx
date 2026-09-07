@@ -2,8 +2,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { calcProjectPrice, formatMargin, MARGIN_COLORS, DEFAULT_PROJECT_MARGIN_PCT } from '../../lib/pricing';
 import { t, inp, btnW, btnG, btnSm, lbl, sub, fg } from './styles';
-
-const pf = (v) => parseFloat(String(v ?? '').replace(/,/g, ''));
+import { toNum, money } from '../../lib/num';
 
 // Fields offered for bulk edit. Blank = leave that field untouched.
 const FIELDS = [
@@ -17,9 +16,9 @@ export function mergeItem(item, vals) {
   return {
     cost:              item.cost,
     cost_currency:     item.cost_currency,
-    shipping_rate:     vals.shipping_rate     !== '' ? pf(vals.shipping_rate)     : (item.shipping_rate ?? 0),
-    customs_duty_rate: vals.customs_duty_rate !== '' ? pf(vals.customs_duty_rate) : (item.customs_duty_rate ?? 5.5),
-    target_margin_pct: vals.target_margin_pct !== '' ? pf(vals.target_margin_pct) : (item.target_margin_pct ?? DEFAULT_PROJECT_MARGIN_PCT),
+    shipping_rate:     vals.shipping_rate     !== '' ? toNum(vals.shipping_rate)     : (item.shipping_rate ?? 0),
+    customs_duty_rate: vals.customs_duty_rate !== '' ? toNum(vals.customs_duty_rate) : (item.customs_duty_rate ?? 5.5),
+    target_margin_pct: vals.target_margin_pct !== '' ? toNum(vals.target_margin_pct) : (item.target_margin_pct ?? DEFAULT_PROJECT_MARGIN_PCT),
   };
 }
 
@@ -96,7 +95,7 @@ export function BulkEditModal({ items, rates, saving, onClose, onApply }) {
 
   const handleApply = () => {
     if (!touched) { setErr('Enter at least one value to apply.'); return; }
-    const m = pf(vals.target_margin_pct), s = pf(vals.shipping_rate), d = pf(vals.customs_duty_rate);
+    const m = toNum(vals.target_margin_pct), s = toNum(vals.shipping_rate), d = toNum(vals.customs_duty_rate);
     if (vals.target_margin_pct !== '' && !(m > 0 && m < 100)) { setErr('Target margin must be between 0 and 100.'); return; }
     if (vals.shipping_rate     !== '' && !(s >= 0))           { setErr('Shipping rate must be 0 or greater.'); return; }
     if (vals.customs_duty_rate !== '' && !(d >= 0))           { setErr('Customs duty must be 0 or greater.'); return; }
@@ -189,10 +188,10 @@ export function BulkEditModal({ items, rates, saving, onClose, onApply }) {
                       )}
                     </td>
                     <td style={{ ...cellSt, color:t.t4 }}>
-                      {beforeIncVat != null ? `AED ${Number(beforeIncVat).toLocaleString()}` : '—'}
+                      {money(beforeIncVat, 'AED')}
                     </td>
                     <td style={{ ...cellSt, color: priceChanged ? t.t1 : t.t4 }}>
-                      {priceChanged ? `→ AED ${afterIncVat != null ? Number(afterIncVat).toLocaleString() : '—'}` : ''}
+                      {priceChanged ? `→ ${money(afterIncVat, 'AED')}` : ''}
                     </td>
                     <td style={{ ...cellSt, color:MARGIN_COLORS[bf.status] }}>{bf.label}</td>
                     <td style={{ ...cellSt, color:MARGIN_COLORS[af.status] }}>→ {af.label}</td>

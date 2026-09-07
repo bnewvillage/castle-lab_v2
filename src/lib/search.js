@@ -13,9 +13,17 @@ export const SEARCH_SEPARATOR = '//';
 export const searchTerms = (raw) =>
   String(raw ?? '').split(SEARCH_SEPARATOR).map(s => s.trim()).filter(Boolean);
 
+// Two separate escapes are needed, and conflating them was the original bug.
+//
 // Parens and commas are structural inside a PostgREST or() expression — a term
 // containing them would be read as extra conditions rather than as text.
-export const escLike = (s) => s.replace(/[(),]/g, '\\$&');
+// % and _ are LIKE wildcards, so an unescaped "%" silently turns any search
+// into match-everything; * is the wildcard in raw URL params. Backslash goes
+// first, otherwise it would double-escape the escapes added after it.
+export const escLike = (s) =>
+  s.replace(/\\/g, '\\\\')
+   .replace(/[%_*]/g, '\\$&')
+   .replace(/[(),]/g, '\\$&');
 
 /**
  * Builds the or() condition list for a search box value.

@@ -16,6 +16,7 @@ export const updateRate                = (...a) => impl.updateRate(...a);
 export const fetchBrands               = (...a) => impl.fetchBrands(...a);
 export const addBrand                  = (...a) => impl.addBrand(...a);
 export const fetchBrandRule            = (...a) => impl.fetchBrandRule(...a);
+export const fetchBrandDefaults        = (...a) => impl.fetchBrandDefaults(...a);
 export const searchItems               = (...a) => impl.searchItems(...a);
 export const fetchItem                 = (...a) => impl.fetchItem(...a);
 export const saveItem                  = (...a) => impl.saveItem(...a);
