@@ -39,14 +39,18 @@ CREATE POLICY "app_users admin write" ON app_users
     WHERE a.email = lower(auth.jwt() ->> 'email') AND a.role = 'admin'
   ));
 
--- >>> SEED YOUR ACCOUNTS BEFORE RUNNING THE REST <<<
--- Mirror REACT_APP_ADMIN_EMAILS / REACT_APP_VIEWER_EMAILS from .env here.
--- Get this wrong and you lock yourself out of your own database.
---
--- INSERT INTO app_users (email, role) VALUES
---   ('you@example.com',      'admin'),
---   ('colleague@example.com','viewer')
--- ON CONFLICT (email) DO UPDATE SET role = EXCLUDED.role;
+-- The roster, mirroring REACT_APP_ADMIN_EMAILS / REACT_APP_VIEWER_EMAILS.
+-- This must be populated before the policies below start enforcing against it,
+-- otherwise every table reads as empty for everyone until it is.
+-- Emails are stored lowercase: the policies compare against lower(jwt email).
+INSERT INTO app_users (email, role) VALUES
+  ('blainevillanuevadxb@gmail.com', 'admin'),
+  ('blaine@oldtimer-me.com',        'admin'),
+  ('maricris@oldtimer-me.com',      'admin'),
+  ('nour@oldtimer-me.com',          'viewer'),
+  ('maiqui@oldtimer-me.com',        'viewer'),
+  ('nour.oldtimer@gmail.com',       'viewer')
+ON CONFLICT (email) DO UPDATE SET role = EXCLUDED.role;
 
 -- ── 2. Helpers ───────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION is_app_user() RETURNS boolean
