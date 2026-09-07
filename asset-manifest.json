@@ -1,13 +1,13 @@
 {
   "files": {
     "main.css": "/castle-lab_v2/static/css/main.e59dc75b.css",
-    "main.js": "/castle-lab_v2/static/js/main.592d8191.js",
+    "main.js": "/castle-lab_v2/static/js/main.cc4306c0.js",
     "index.html": "/castle-lab_v2/index.html",
     "main.e59dc75b.css.map": "/castle-lab_v2/static/css/main.e59dc75b.css.map",
-    "main.592d8191.js.map": "/castle-lab_v2/static/js/main.592d8191.js.map"
+    "main.cc4306c0.js.map": "/castle-lab_v2/static/js/main.cc4306c0.js.map"
   },
   "entrypoints": [
     "static/css/main.e59dc75b.css",
-    "static/js/main.592d8191.js"
+    "static/js/main.cc4306c0.js"
   ]
 }
