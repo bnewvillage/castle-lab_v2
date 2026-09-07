@@ -2,6 +2,7 @@
 // PRICING CALCULATIONS
 // One place to audit all math. No DB calls here — pure functions.
 // ─────────────────────────────────────────────────────────────
+import { toNum, round } from './num';
 
 // Compound two markups multiplicatively: base% + additional% applied on top
 // e.g. compoundMarkup(10, 5) = ((1.10 × 1.05) - 1) × 100 = 15.5%
@@ -26,16 +27,22 @@ export function calcLandedCost({ exw_cost, shipping_rate, customs_duty_rate, cos
 // ── PRICE USED RESOLVER ───────────────────────────────────────
 
 /**
- * Resolve the selected MSRP value and its currency from an item
+ * The MSRP a row is priced from, as { value, currency }.
+ *
+ * The single implementation for every caller — form state, an Excel row and a
+ * database record all use the same field names, and toNum accepts strings and
+ * numbers alike, so no caller needs its own copy of this map. `cost_based`
+ * rows price from cost rather than a vendor MSRP and resolve to nulls.
  */
 export function resolvePriceUsed(item) {
   const map = {
-    primary_ex_vat:    { value: item.msrp_primary_ex_vat,    currency: item.msrp_primary_currency },
-    primary_inc_vat:   { value: item.msrp_primary_inc_vat,   currency: item.msrp_primary_currency },
-    secondary_ex_vat:  { value: item.msrp_secondary_ex_vat,  currency: item.msrp_secondary_currency },
-    secondary_inc_vat: { value: item.msrp_secondary_inc_vat, currency: item.msrp_secondary_currency },
+    primary_ex_vat:    [item.msrp_primary_ex_vat,    item.msrp_primary_currency],
+    primary_inc_vat:   [item.msrp_primary_inc_vat,   item.msrp_primary_currency],
+    secondary_ex_vat:  [item.msrp_secondary_ex_vat,  item.msrp_secondary_currency],
+    secondary_inc_vat: [item.msrp_secondary_inc_vat, item.msrp_secondary_currency],
   };
-  return map[item.price_used] || { value: null, currency: null };
+  const [value, currency] = map[item.price_used] ?? [];
+  return { value: toNum(value), currency: currency || null };
 }
 
 // ── EXW MARGIN ────────────────────────────────────────────────
@@ -251,6 +258,23 @@ export function calcProjectPrice({ cost, cost_currency, shipping_rate, customs_d
     cost_ex_customs_src:   parseFloat(costExCustomsSrc.toFixed(2)),
     landed_cost_src:       parseFloat(landedSrc.toFixed(2)),
   };
+}
+
+// ── BRAND DEFAULTS ────────────────────────────────────────────
+// The settings a brand's recent items most commonly use, for pre-filling a new
+// SKU. Pure so both data layers can share it — the caller supplies the rows.
+export const BRAND_DEFAULT_FIELDS = ['cost_currency','shipping_rate','customs_duty_rate','cost_source','msrp_primary_currency','price_used','price_source'];
+
+export function brandDefaultsFrom(rows) {
+  if (!rows?.length) return null;
+  const modeOf = (key) => {
+    const vals = rows.map(r => r[key]).filter(v => v !== null && v !== undefined && v !== '');
+    if (!vals.length) return null;
+    const freq = new Map();
+    for (const v of vals) freq.set(String(v), (freq.get(String(v)) ?? 0) + 1);
+    return [...freq.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  };
+  return Object.fromEntries(BRAND_DEFAULT_FIELDS.map(k => [k, modeOf(k)]));
 }
 
 // ── VALIDATION ────────────────────────────────────────────────

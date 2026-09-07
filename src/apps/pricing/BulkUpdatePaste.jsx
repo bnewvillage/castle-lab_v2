@@ -1,15 +1,14 @@
 import { useState, useEffect } from 'react';
+import { toNum } from '../../lib/num';
 import * as XLSX from 'xlsx-js-style';
 import { fetchBrands, fetchRates, fetchItemsByCodes, bulkUpdateItemFields } from '../../lib/db';
-import { calcMSRPs, calcCostBasedMSRPs, DEFAULT_COST_MARGIN_PCT } from '../../lib/pricing';
+import { calcMSRPs, calcCostBasedMSRPs, DEFAULT_COST_MARGIN_PCT, resolvePriceUsed } from '../../lib/pricing';
 import { t, inp, sel, btnW, btnG, lbl, groupBox, groupHead, CURRENCIES } from './styles';
 import BrandSelect from './BrandSelect';
 
 const SOURCES         = ['Portal','File','Website','Invoice','Estimate'];
 const PRICE_USED_OPTS = ['primary_ex_vat','primary_inc_vat','cost_based'];
 const NO_CHANGE       = '';   // sentinel for "leave this column alone"
-
-const toNum = (v) => { const n = parseFloat(String(v ?? '').replace(/,/g, '')); return isNaN(n) ? null : n; };
 
 // Columns pasted per row. A blank line leaves that field untouched for that item.
 const PASTE_FIELDS = [
@@ -80,13 +79,7 @@ function recalcPrices(merged, markup, additional, rates) {
         toNum(merged.target_margin_pct) ?? DEFAULT_COST_MARGIN_PCT, rates, additional,
       );
     }
-    const map = {
-      primary_ex_vat:    [toNum(merged.msrp_primary_ex_vat),    merged.msrp_primary_currency],
-      primary_inc_vat:   [toNum(merged.msrp_primary_inc_vat),   merged.msrp_primary_currency],
-      secondary_ex_vat:  [toNum(merged.msrp_secondary_ex_vat),  merged.msrp_secondary_currency],
-      secondary_inc_vat: [toNum(merged.msrp_secondary_inc_vat), merged.msrp_secondary_currency],
-    };
-    const [value, currency] = map[merged.price_used] || [];
+    const { value, currency } = resolvePriceUsed(merged);
     if (value == null || !currency) return null;
     return calcMSRPs(value, currency, markup ?? 10, additional, rates);
   } catch { return null; }

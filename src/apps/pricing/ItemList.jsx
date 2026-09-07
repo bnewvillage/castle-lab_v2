@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { fetchItemList, fetchHistory } from '../../lib/db';
-import { calcAllMargins, calcEmployeePrice, formatMargin, MARGIN_COLORS } from '../../lib/pricing';
+import { calcAllMargins, calcEmployeePrice, formatMargin, MARGIN_COLORS, resolvePriceUsed } from '../../lib/pricing';
+import { money } from '../../lib/num';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, PRICE_USED_OPTIONS } from './styles';
 import { useAuth } from '../../lib/AuthContext';
 import BrandSelect from './BrandSelect';
@@ -14,17 +15,6 @@ const MARGIN_RANGES = [
   { label:'30% – 40%',   min:30,   max:40   },
   { label:'Above 40%',   min:40,   max:null },
 ];
-
-function resolveMSRP(item) {
-  switch (item.price_used) {
-    case 'primary_ex_vat':    return { value:item.msrp_primary_ex_vat,    currency:item.msrp_primary_currency };
-    case 'primary_inc_vat':   return { value:item.msrp_primary_inc_vat,   currency:item.msrp_primary_currency };
-    case 'secondary_ex_vat':  return { value:item.msrp_secondary_ex_vat,  currency:item.msrp_secondary_currency };
-    case 'secondary_inc_vat': return { value:item.msrp_secondary_inc_vat, currency:item.msrp_secondary_currency };
-    case 'cost_based':        return { value:null, currency:null }; // price derived from cost, no vendor MSRP
-    default: return { value:item.msrp_primary_ex_vat, currency:item.msrp_primary_currency };
-  }
-}
 
 const fmtDate  = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'2-digit' }) : '—';
 const fmtNum   = (v) => v != null ? Number(v).toLocaleString() : '—';
@@ -130,9 +120,9 @@ function InlineSummary({ item, rates }) {
                 Current pricing
               </div>
               {[
-                ['UAE', item.msrp_aed!=null?`AED ${fmtNum(item.msrp_aed)}`:'—', margins?.uae_margin],
-                ['KSA', item.msrp_sar!=null?`SAR ${fmtNum(item.msrp_sar)}`:'—', margins?.ksa_margin],
-                ['QAT', item.msrp_qat!=null?`QAR ${fmtNum(item.msrp_qat)}`:'—', margins?.qat_margin],
+                ['UAE', money(item.msrp_aed, 'AED'), margins?.uae_margin],
+                ['KSA', money(item.msrp_sar, 'SAR'), margins?.ksa_margin],
+                ['QAT', money(item.msrp_qat, 'QAR'), margins?.qat_margin],
               ].map(([country, price, margin]) => {
                 const m = formatMargin(margin);
                 return (
@@ -147,7 +137,7 @@ function InlineSummary({ item, rates }) {
               })}
               <div style={rowStyle}>
                 <span style={labelStyle}>Landed cost</span>
-                <span style={valStyle}>{margins?.landed_cost_aed!=null?`AED ${margins.landed_cost_aed.toFixed(2)}`:'—'}</span>
+                <span style={valStyle}>{money(margins?.landed_cost_aed, 'AED', 2)}</span>
               </div>
               {(() => {
                 const exwFmt = formatMargin(margins?.exw_margin);
@@ -163,7 +153,7 @@ function InlineSummary({ item, rates }) {
               })()}
               <div style={{ ...rowStyle, borderBottom:'none' }}>
                 <span style={labelStyle}>Employee price</span>
-                <span style={{ ...valStyle, color:t.amber }}>{emp!=null?`AED ${emp.toLocaleString()}`:'—'}</span>
+                <span style={{ ...valStyle, color:t.amber }}>{money(emp, 'AED')}</span>
               </div>
             </div>
 
@@ -472,7 +462,7 @@ export default function ItemList({ rates, brands, onEditItem, maximized, setExpo
               </thead>
               <tbody>
                 {rows.map((item,i) => {
-                  const msrp    = resolveMSRP(item);
+                  const msrp    = resolvePriceUsed(item);
                   const margins = item._margins;
                   const m       = formatMargin(margins?.uae_margin);
                   const landed  = margins?.landed_cost_aed;
@@ -493,12 +483,12 @@ export default function ItemList({ rates, brands, onEditItem, maximized, setExpo
                         <td style={{ ...td(false), color:t.t3 }}>{msrp.currency||'—'}</td>
                         <td style={{ ...td(false), textAlign:'right' }}>{fmtNum(item.exw_cost)}</td>
                         <td style={{ ...td(false), color:t.t3 }}>{item.cost_currency||'—'}</td>
-                        <td style={{ ...td(true), textAlign:'right' }}>{item.msrp_aed!=null?`AED ${fmtNum(item.msrp_aed)}`:'—'}</td>
-                        <td style={{ ...td(false), textAlign:'right' }}>{item.msrp_sar!=null?`SAR ${fmtNum(item.msrp_sar)}`:'—'}</td>
-                        <td style={{ ...td(false), textAlign:'right' }}>{item.msrp_qat!=null?`QAR ${fmtNum(item.msrp_qat)}`:'—'}</td>
+                        <td style={{ ...td(true), textAlign:'right' }}>{money(item.msrp_aed, 'AED')}</td>
+                        <td style={{ ...td(false), textAlign:'right' }}>{money(item.msrp_sar, 'SAR')}</td>
+                        <td style={{ ...td(false), textAlign:'right' }}>{money(item.msrp_qat, 'QAR')}</td>
                         <td style={{ ...td(false), textAlign:'right', color:t.t3 }}>{item.shipping_rate??'—'}</td>
                         <td style={{ ...td(false), textAlign:'right', color:t.t3 }}>{item.customs_duty_rate??'—'}</td>
-                        <td style={{ ...td(false), textAlign:'right' }}>{landed!=null?`AED ${landed.toFixed(2)}`:'—'}</td>
+                        <td style={{ ...td(false), textAlign:'right' }}>{money(landed, 'AED', 2)}</td>
                         <td style={{ ...td(false), textAlign:'right', color:MARGIN_COLORS[m.status], fontWeight:600 }}>{m.label}</td>
                         <td style={{ ...td(false), color:t.t3 }}>{item.price_source||'—'}</td>
                         <td style={{ ...td(false), color:t.t3 }}>{item.cost_source||'—'}</td>

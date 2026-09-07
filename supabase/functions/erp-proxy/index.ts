@@ -1,10 +1,48 @@
 // Set with: supabase secrets set ERP_BASE=https://your-erp-host
 const ERP_BASE = (Deno.env.get('ERP_BASE') ?? '').replace(/\/+$/, '');
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+// Who may call this function. Supabase verifies the JWT before this runs, but
+// that only proves the caller is *authenticated* — not that they are one of
+// ours. Set with: supabase secrets set ERP_ALLOWED_EMAILS=a@x.com,b@x.com
+const ALLOWED_EMAILS = new Set(
+  (Deno.env.get('ERP_ALLOWED_EMAILS') ?? '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
+);
+
+// The reports the app actually asks for. Without this the function is an
+// arbitrary report reader for anyone holding ERP credentials.
+const ALLOWED_REPORTS = new Set([
+  'PRICE-AED_ValidFromLatest',
+  'PRICE-SAR_ValidFromLatest',
+  'PRICE-QAR_ValidFromLatest',
+  'Item In Stock Without Price',
+]);
+
+// Browser origins permitted to call this. Set with:
+// supabase secrets set ERP_ALLOWED_ORIGINS=https://castle-lab.web.app,http://localhost:3000
+const ALLOWED_ORIGINS = (Deno.env.get('ERP_ALLOWED_ORIGINS') ?? '')
+  .split(',').map(s => s.trim()).filter(Boolean);
+
+const corsFor = (req: Request) => {
+  const origin = req.headers.get('origin') ?? '';
+  return {
+    'Access-Control-Allow-Origin': ALLOWED_ORIGINS.includes(origin) ? origin : (ALLOWED_ORIGINS[0] ?? 'null'),
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Vary': 'Origin',
+  };
 };
+
+// The caller's email from the JWT payload. Verifying the signature is
+// Supabase's job (verify_jwt); we only read the claim it already validated.
+function callerEmail(req: Request): string | null {
+  const raw = (req.headers.get('authorization') ?? '').replace(/^Bearer /i, '');
+  const part = raw.split('.')[1];
+  if (!part) return null;
+  try {
+    const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+    const claims = JSON.parse(atob(b64 + '='.repeat((4 - b64.length % 4) % 4)));
+    return typeof claims.email === 'string' ? claims.email.toLowerCase() : null;
+  } catch { return null; }
+}
 
 const PAGE_SIZE   = 500;
 const MAX_RETRIES = 3;
@@ -17,9 +55,10 @@ const MAX_PAGES   = 40;      // ceiling per invocation, to stay inside the funct
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-const json = (body: unknown, status = 200) =>
+const json = (body: unknown, status = 200, req?: Request) =>
   new Response(JSON.stringify(body), {
-    status, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    status,
+    headers: { ...(req ? corsFor(req) : {}), 'Content-Type': 'application/json' },
   });
 
 async function erpLogin(email: string, password: string): Promise<string> {
@@ -74,11 +113,16 @@ async function fetchItemPage(
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response('ok', { headers: corsFor(req) });
   }
 
   try {
-    if (!ERP_BASE) return json({ error: 'ERP_BASE not configured' }, 500);
+    if (!ERP_BASE) return json({ error: 'ERP_BASE not configured' }, 500, req);
+
+    // An unconfigured allowlist fails closed rather than open.
+    const caller = callerEmail(req);
+    if (ALLOWED_EMAILS.size === 0) return json({ error: 'Proxy not configured for any caller' }, 503, req);
+    if (!caller || !ALLOWED_EMAILS.has(caller)) return json({ error: 'Not authorised' }, 403, req);
 
     const body = await req.json() as {
       email?: string;
@@ -91,7 +135,7 @@ Deno.serve(async (req) => {
     };
     const { email, password, action, report_name } = body;
 
-    if (!email || !password) return json({ error: 'email and password required' }, 400);
+    if (!email || !password) return json({ error: 'email and password required' }, 400, req);
 
     const sessionCookie = await erpLogin(email, password);
 
@@ -113,11 +157,12 @@ Deno.serve(async (req) => {
         if (p < pages - 1) await sleep(PAGE_WAIT);
       }
 
-      return json({ items, nextStart: cursor, done });
+      return json({ items, nextStart: cursor, done }, 200, req);
     }
 
     // ── default: fetch a named report ────────────────────────────
-    if (!report_name) return json({ error: 'report_name or action required' }, 400);
+    if (!report_name) return json({ error: 'report_name or action required' }, 400, req);
+    if (!ALLOWED_REPORTS.has(report_name)) return json({ error: 'Unknown report' }, 400, req);
 
     const reportRes = await fetch(
       `${ERP_BASE}/api/method/frappe.desk.query_report.run?report_name=${encodeURIComponent(report_name)}`,
@@ -149,9 +194,12 @@ Deno.serve(async (req) => {
         : r
     );
 
-    return json({ rows, columns: fieldnames });
+    return json({ rows, columns: fieldnames }, 200, req);
 
   } catch (err) {
-    return json({ error: err instanceof Error ? err.message : 'Unknown error' }, 500);
+    // Upstream text can carry ERP internals and login-failure detail, so it is
+    // logged for operators and flattened for the caller.
+    console.error('erp-proxy failure:', err);
+    return json({ error: 'ERP request failed' }, 502, req);
   }
 });

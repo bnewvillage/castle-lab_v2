@@ -6,18 +6,14 @@
 // persist for the session and reset on page reload.
 // ─────────────────────────────────────────────────────────────
 import { store } from './demoData';
+import { toNum } from '../lib/num';
+import { brandDefaultsFrom } from '../lib/pricing';
 import { DEMO_USER } from './demoConfig';
 import { matchesSearch } from '../lib/search';
 
 // Small artificial latency so loading states actually render.
 const wait = (ms = 130) => new Promise(r => setTimeout(r, ms));
 const clone = (v) => JSON.parse(JSON.stringify(v));
-
-const toNum = (v) => {
-  if (v === '' || v === null || v === undefined) return null;
-  const n = parseFloat(String(v).replace(/,/g, ''));
-  return isNaN(n) ? null : n;
-};
 
 const brandName = (code) => store.brands.find(b => b.brand_code === code)?.brand_name ?? null;
 const withBrand = (item) => ({ ...item, brands: { brand_name: brandName(item.brand_code) } });
@@ -97,6 +93,11 @@ export async function fetchBrandRule(brandCode) {
   await wait(60);
   const r = store.brandRules.find(x => x.brand_code === brandCode);
   return r ? { markup_percentage: r.markup_percentage, additional_markup_pct: r.additional_markup_pct } : null;
+}
+
+export async function fetchBrandDefaults(brandCode) {
+  await wait(60);
+  return brandDefaultsFrom(store.pricingMaster.filter(i => i.brand_code === brandCode).slice(0, 30));
 }
 
 export async function insertBrand(brandCode, brandName, markupPercentage = 10) {

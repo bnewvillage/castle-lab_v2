@@ -1,13 +1,33 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-// Strip thousands-separator commas before parseFloat — guards against pasted Excel values like "1,185.00"
-const pf = (v) => parseFloat(String(v ?? '').replace(/,/g, ''));
 import { motion, AnimatePresence } from 'framer-motion';
-import { fetchBrandRule, searchItems, fetchItem, fetchHistory, saveItem } from '../../lib/db';
-import { calcAllMargins, suggestKSAPrice, suggestQATPrice, suggestUAEPrice, calcEmployeePrice, formatMargin, MARGIN_COLORS, compoundMarkup, calcMSRPs, calcCostBasedMSRPs, DEFAULT_COST_MARGIN_PCT } from '../../lib/pricing';
+import { fetchBrandRule, fetchBrandDefaults, searchItems, fetchItem, fetchHistory, saveItem } from '../../lib/db';
+import { toNum, hasNum, round, money } from '../../lib/num';
+import { calcAllMargins, suggestKSAPrice, suggestQATPrice, calcEmployeePrice, formatMargin, MARGIN_COLORS, calcMSRPs, calcCostBasedMSRPs, DEFAULT_COST_MARGIN_PCT, resolvePriceUsed } from '../../lib/pricing';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead, segDiv, CURRENCIES, SOURCES, PRICE_USED_OPTIONS } from './styles';
 import BrandSelect from './BrandSelect';
 import { useAuth } from '../../lib/AuthContext';
 import { downloadXLSX } from '../../lib/xlsxExport';
+
+/**
+ * The six MSRP fields implied by the current form, or null when there is not
+ * enough input yet. Both pricing bases go through here, so a cost-based row and
+ * an MSRP-based row can never drift apart — they previously lived in two
+ * copy-pasted effects that already disagreed on how KSA was derived.
+ */
+function derivePrices(form, { markup, additionalMarkup, rates }) {
+  if (!form.price_used) return null;
+  if (form.price_used === 'cost_based') {
+    return calcCostBasedMSRPs(
+      toNum(form.exw_cost), form.cost_currency,
+      toNum(form.target_margin_pct) ?? DEFAULT_COST_MARGIN_PCT,
+      rates, additionalMarkup ?? null,
+    );
+  }
+  if (markup == null) return null;
+  const { value, currency } = resolvePriceUsed(form);
+  if (value == null || !currency) return null;
+  return calcMSRPs(value, currency, markup, additionalMarkup ?? null, rates);
+}
 
 // ── ROOT ──────────────────────────────────────────────────────
 const BLANK = {
@@ -165,9 +185,9 @@ export default function SingleSKU({ rates, brands, editTarget, onEditTargetConsu
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:1, background:t.b1 }}>
               {[
-                {country:'UAE',price:selected.msrp_aed!=null?`AED ${selected.msrp_aed.toLocaleString()}`:'—',margin:margins?.uae_margin},
-                {country:'KSA',price:selected.msrp_sar!=null?`SAR ${selected.msrp_sar.toLocaleString()}`:'—',margin:margins?.ksa_margin},
-                {country:'QAT',price:selected.msrp_qat!=null?`QAR ${selected.msrp_qat.toLocaleString()}`:'—',margin:margins?.qat_margin},
+                {country:'UAE',price:money(selected.msrp_aed,'AED'),margin:margins?.uae_margin},
+                {country:'KSA',price:money(selected.msrp_sar,'SAR'),margin:margins?.ksa_margin},
+                {country:'QAT',price:money(selected.msrp_qat,'QAR'),margin:margins?.qat_margin},
               ].map(({country,price,margin}) => {
                 const m=formatMargin(margin);
                 return (
@@ -183,7 +203,7 @@ export default function SingleSKU({ rates, brands, editTarget, onEditTargetConsu
               const exwFmt = formatMargin(margins?.exw_margin);
               return (
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:1, background:t.b1 }}>
-                  <div style={{ background:t.bg2, padding:'14px 20px' }}><div style={{ fontSize:11, color:t.t4, fontFamily:'var(--font-mono)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:5 }}>EXW cost</div><div style={{ fontSize:13, color:t.t2 }}>{selected.cost_currency} {selected.exw_cost!=null?selected.exw_cost.toLocaleString():'—'}</div></div>
+                  <div style={{ background:t.bg2, padding:'14px 20px' }}><div style={{ fontSize:11, color:t.t4, fontFamily:'var(--font-mono)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:5 }}>EXW cost</div><div style={{ fontSize:13, color:t.t2 }}>{money(selected.exw_cost, selected.cost_currency)}</div></div>
                   <div style={{ background:t.bg2, padding:'14px 20px' }}><div style={{ fontSize:11, color:t.t4, fontFamily:'var(--font-mono)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:5 }}>EXW margin</div><div style={{ fontSize:13, fontWeight:500, color:MARGIN_COLORS[exwFmt.status] }}>{exwFmt.label}</div><div style={{ fontSize:10, color:t.t4, marginTop:2 }}>price used vs cost · no markup</div></div>
                   <div style={{ background:t.bg2, padding:'14px 20px' }}><div style={{ fontSize:11, color:t.t4, fontFamily:'var(--font-mono)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:5 }}>Landed cost</div><div style={{ fontSize:13, fontWeight:500, color:t.t1 }}>{margins?.landed_cost_aed?`AED ${margins.landed_cost_aed.toFixed(2)}`:'—'}</div></div>
                   <div style={{ background:t.bg2, padding:'14px 20px' }}><div style={{ fontSize:11, color:t.t4, fontFamily:'var(--font-mono)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:5 }}>Employee price</div><div style={{ fontSize:13, color:t.amber }}>AED {emp?.toLocaleString()||'—'}</div></div>
@@ -251,59 +271,14 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
   // Recalc KSA/QAT when UAE changes
   useEffect(() => {
     if (viewMode) return;
-    const uae = pf(form.msrp_aed);
+    const uae = toNum(form.msrp_aed);
     if (!uae) return;
     setForm(f => ({
       ...f,
-      msrp_sar: f.ksa_overridden ? f.msrp_sar : parseFloat((suggestKSAPrice(uae)||0).toFixed(2)),
-      msrp_qat: f.qat_overridden ? f.msrp_qat : parseFloat((suggestQATPrice(uae)||0).toFixed(2)),
+      msrp_sar: f.ksa_overridden ? f.msrp_sar : round(suggestKSAPrice(uae)),
+      msrp_qat: f.qat_overridden ? f.msrp_qat : round(suggestQATPrice(uae)),
     }));
   }, [form.msrp_aed, viewMode]);
-
-  // When UAE override is reverted, re-trigger suggestion by nudging markup dependency
-  useEffect(() => {
-    if (viewMode) return;
-    if (form.uae_overridden) return;
-    if (!form.price_used) return;
-    if (form.price_used === 'cost_based') {
-      const msrps = calcCostBasedMSRPs(pf(form.exw_cost), form.cost_currency, hasVal(form.target_margin_pct) ? pf(form.target_margin_pct) : DEFAULT_COST_MARGIN_PCT, rates, additionalMarkup ?? null);
-      if (!msrps) return;
-      setForm(f => ({
-        ...f,
-        msrp_aed:      msrps.msrp_aed,
-        msrp_sar:      f.ksa_overridden ? f.msrp_sar : msrps.msrp_sar,
-        msrp_qat:      f.qat_overridden ? f.msrp_qat : msrps.msrp_qat,
-        real_msrp_aed: msrps.real_msrp_aed,
-        real_msrp_sar: msrps.real_msrp_sar,
-        real_msrp_qat: msrps.real_msrp_qat,
-      }));
-      return;
-    }
-    if (markup === null || markup === undefined) return;
-    const map = {
-      primary_ex_vat:    { value: pf(form.msrp_primary_ex_vat),    currency: form.msrp_primary_currency },
-      primary_inc_vat:   { value: pf(form.msrp_primary_inc_vat),   currency: form.msrp_primary_currency },
-      secondary_ex_vat:  { value: pf(form.msrp_secondary_ex_vat),  currency: form.msrp_secondary_currency },
-      secondary_inc_vat: { value: pf(form.msrp_secondary_inc_vat), currency: form.msrp_secondary_currency },
-    };
-    const { value, currency } = map[form.price_used] || {};
-    if (value == null || isNaN(value) || !currency) return;
-    const effectiveMarkup = compoundMarkup(markup, additionalMarkup ?? 0);
-    const uae = suggestUAEPrice(value, currency, effectiveMarkup, rates);
-    if (!uae) return;
-    const uaeR = parseFloat(uae.toFixed(2));
-    const realUae = suggestUAEPrice(value, currency, markup, rates);
-    const realUaeR = realUae != null ? parseFloat(realUae.toFixed(2)) : null;
-    setForm(f => ({
-      ...f,
-      msrp_aed:      uaeR,
-      msrp_sar:      f.ksa_overridden ? f.msrp_sar : parseFloat((suggestKSAPrice(uaeR)||0).toFixed(2)),
-      msrp_qat:      f.qat_overridden ? f.msrp_qat : parseFloat((suggestQATPrice(uaeR)||0).toFixed(2)),
-      real_msrp_aed: realUaeR,
-      real_msrp_sar: realUaeR != null ? parseFloat((suggestKSAPrice(realUaeR)||0).toFixed(2)) : null,
-      real_msrp_qat: realUaeR != null ? parseFloat((suggestQATPrice(realUaeR)||0).toFixed(2)) : null,
-    }));
-  }, [form.uae_overridden, viewMode]);
 
   // Load markup + hints
   useEffect(() => {
@@ -312,58 +287,25 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
       setMarkup(r?.markup_percentage ?? 10);
       setAdditionalMarkup(r?.additional_markup_pct ?? null);
     });
-    import('../../lib/supabase').then(({supabase}) => {
-      supabase.from('pricing_master')
-        .select('cost_currency,shipping_rate,customs_duty_rate,cost_source,msrp_primary_currency,price_used,price_source')
-        .eq('brand_code',form.brand_code).order('created_at',{ascending:false}).limit(30)
-        .then(({data}) => {
-          if (!data?.length) { setHint(null); setPriceHint(null); return; }
-          const mode = arr => arr.filter(Boolean).sort((a,b)=>arr.filter(v=>v===a).length-arr.filter(v=>v===b).length).pop();
-          setHint({ cost_currency:mode(data.map(d=>d.cost_currency)), shipping_rate:mode(data.map(d=>String(d.shipping_rate))), customs_duty_rate:mode(data.map(d=>String(d.customs_duty_rate))), cost_source:mode(data.map(d=>d.cost_source)) });
-          setPriceHint({ price_used:mode(data.map(d=>d.price_used)), price_source:mode(data.map(d=>d.price_source)), msrp_primary_currency:mode(data.map(d=>d.msrp_primary_currency)) });
-        });
-    });
+    fetchBrandDefaults(form.brand_code).then(d => {
+      setHint(d && { cost_currency:d.cost_currency, shipping_rate:d.shipping_rate, customs_duty_rate:d.customs_duty_rate, cost_source:d.cost_source });
+      setPriceHint(d && { price_used:d.price_used, price_source:d.price_source, msrp_primary_currency:d.msrp_primary_currency });
+    }).catch(() => { setHint(null); setPriceHint(null); });
   }, [form.brand_code]);
 
-  // Auto-suggest prices — two-pass prettification: base markup → real_msrp, additional → msrp
+  // Auto-suggest prices. Reverting a market override is just another input
+  // change, so it re-runs this same derivation rather than a parallel copy.
   useEffect(() => {
     if (viewMode) return;
-    if (!form.price_used) return;
-    if (form.price_used === 'cost_based') {
-      const msrps = calcCostBasedMSRPs(pf(form.exw_cost), form.cost_currency, hasVal(form.target_margin_pct) ? pf(form.target_margin_pct) : DEFAULT_COST_MARGIN_PCT, rates, additionalMarkup ?? null);
-      if (!msrps) return;
-      setForm(f => {
-        const effectiveAed = f.uae_overridden ? f.msrp_aed : msrps.msrp_aed;
-        return {
-          ...f,
-          msrp_aed:      effectiveAed,
-          msrp_sar:      f.ksa_overridden ? f.msrp_sar : parseFloat((suggestKSAPrice(effectiveAed)||0).toFixed(2)),
-          msrp_qat:      f.qat_overridden ? f.msrp_qat : parseFloat((suggestQATPrice(effectiveAed)||0).toFixed(2)),
-          real_msrp_aed: msrps.real_msrp_aed,
-          real_msrp_sar: msrps.real_msrp_sar,
-          real_msrp_qat: msrps.real_msrp_qat,
-        };
-      });
-      return;
-    }
-    if (markup===null || markup===undefined) return;
-    const map = {
-      primary_ex_vat:    {value:pf(form.msrp_primary_ex_vat),   currency:form.msrp_primary_currency},
-      primary_inc_vat:   {value:pf(form.msrp_primary_inc_vat),  currency:form.msrp_primary_currency},
-      secondary_ex_vat:  {value:pf(form.msrp_secondary_ex_vat), currency:form.msrp_secondary_currency},
-      secondary_inc_vat: {value:pf(form.msrp_secondary_inc_vat),currency:form.msrp_secondary_currency},
-    };
-    const {value,currency} = map[form.price_used]||{};
-    if (value == null || isNaN(value) || !currency) return;
-    const msrps = calcMSRPs(value, currency, markup, additionalMarkup ?? null, rates);
+    const msrps = derivePrices(form, { markup, additionalMarkup, rates });
     if (!msrps) return;
     setForm(f => {
-      const effectiveAed = f.uae_overridden ? f.msrp_aed : msrps.msrp_aed;
+      const aed = f.uae_overridden ? f.msrp_aed : msrps.msrp_aed;
       return {
         ...f,
-        msrp_aed:      effectiveAed,
-        msrp_sar:      f.ksa_overridden ? f.msrp_sar : parseFloat((suggestKSAPrice(effectiveAed)||0).toFixed(2)),
-        msrp_qat:      f.qat_overridden ? f.msrp_qat : parseFloat((suggestQATPrice(effectiveAed)||0).toFixed(2)),
+        msrp_aed:      aed,
+        msrp_sar:      f.ksa_overridden ? f.msrp_sar : round(suggestKSAPrice(aed)),
+        msrp_qat:      f.qat_overridden ? f.msrp_qat : round(suggestQATPrice(aed)),
         real_msrp_aed: msrps.real_msrp_aed,
         real_msrp_sar: msrps.real_msrp_sar,
         real_msrp_qat: msrps.real_msrp_qat,
@@ -371,11 +313,10 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
     });
   }, [form.price_used,form.msrp_primary_ex_vat,form.msrp_primary_inc_vat,form.msrp_primary_currency,
       form.msrp_secondary_ex_vat,form.msrp_secondary_inc_vat,form.msrp_secondary_currency,
-      form.exw_cost,form.cost_currency,form.target_margin_pct,markup,additionalMarkup,viewMode]);
+      form.exw_cost,form.cost_currency,form.target_margin_pct,form.uae_overridden,
+      markup,additionalMarkup,viewMode]);
 
-  // Zero is a legitimate cost/price (not-for-sale items, costs never supplied),
-  // so only a blank or non-numeric entry counts as missing.
-  const hasVal = v => v!==''&&v!==null&&v!==undefined&&!isNaN(pf(v));
+  const hasVal = hasNum;
   const availablePriceUsed = PRICE_USED_OPTIONS.filter(o => hasVal(form[o.needs]));
   const priceUsedOptions   = availablePriceUsed.length>0 ? availablePriceUsed : PRICE_USED_OPTIONS;
   const itemCode = form.brand_code&&form.sku_suffix ? `${form.brand_code}-${form.sku_suffix}` : '';
@@ -384,20 +325,20 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
     ...form,
     item_code:              itemCode,
     barcode:                form.barcode||null,
-    exw_cost:               form.exw_cost!==''?pf(form.exw_cost)||0:null,
-    shipping_rate:          pf(form.shipping_rate)||0,
-    customs_duty_rate:      pf(form.customs_duty_rate)??5.5,
-    msrp_primary_ex_vat:    hasVal(form.msrp_primary_ex_vat)?pf(form.msrp_primary_ex_vat):null,
-    msrp_primary_inc_vat:   hasVal(form.msrp_primary_inc_vat)?pf(form.msrp_primary_inc_vat):null,
-    msrp_secondary_ex_vat:  hasVal(form.msrp_secondary_ex_vat)?pf(form.msrp_secondary_ex_vat):null,
-    msrp_secondary_inc_vat: hasVal(form.msrp_secondary_inc_vat)?pf(form.msrp_secondary_inc_vat):null,
-    msrp_aed:               hasVal(form.msrp_aed)?pf(form.msrp_aed):null,
-    msrp_sar:               hasVal(form.msrp_sar)?pf(form.msrp_sar):null,
-    msrp_qat:               hasVal(form.msrp_qat)?pf(form.msrp_qat):null,
-    real_msrp_aed:          hasVal(form.real_msrp_aed)?pf(form.real_msrp_aed):null,
-    real_msrp_sar:          hasVal(form.real_msrp_sar)?pf(form.real_msrp_sar):null,
-    real_msrp_qat:          hasVal(form.real_msrp_qat)?pf(form.real_msrp_qat):null,
-    target_margin_pct:      form.price_used==='cost_based' ? (hasVal(form.target_margin_pct)?pf(form.target_margin_pct):DEFAULT_COST_MARGIN_PCT) : null,
+    exw_cost:               form.exw_cost!==''?toNum(form.exw_cost)||0:null,
+    shipping_rate:          toNum(form.shipping_rate)||0,
+    customs_duty_rate:      toNum(form.customs_duty_rate)??5.5,
+    msrp_primary_ex_vat:    hasVal(form.msrp_primary_ex_vat)?toNum(form.msrp_primary_ex_vat):null,
+    msrp_primary_inc_vat:   hasVal(form.msrp_primary_inc_vat)?toNum(form.msrp_primary_inc_vat):null,
+    msrp_secondary_ex_vat:  hasVal(form.msrp_secondary_ex_vat)?toNum(form.msrp_secondary_ex_vat):null,
+    msrp_secondary_inc_vat: hasVal(form.msrp_secondary_inc_vat)?toNum(form.msrp_secondary_inc_vat):null,
+    msrp_aed:               hasVal(form.msrp_aed)?toNum(form.msrp_aed):null,
+    msrp_sar:               hasVal(form.msrp_sar)?toNum(form.msrp_sar):null,
+    msrp_qat:               hasVal(form.msrp_qat)?toNum(form.msrp_qat):null,
+    real_msrp_aed:          hasVal(form.real_msrp_aed)?toNum(form.real_msrp_aed):null,
+    real_msrp_sar:          hasVal(form.real_msrp_sar)?toNum(form.real_msrp_sar):null,
+    real_msrp_qat:          hasVal(form.real_msrp_qat)?toNum(form.real_msrp_qat):null,
+    target_margin_pct:      form.price_used==='cost_based' ? (hasVal(form.target_margin_pct)?toNum(form.target_margin_pct):DEFAULT_COST_MARGIN_PCT) : null,
   });
 
   const item    = asItem();
@@ -409,19 +350,13 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
       setEstimateError('Not needed — price is already derived from cost via target margin');
       return;
     }
-    const target = pf(estimateTarget);
-    if (isNaN(target) || target <= 0 || target >= 100) {
+    const target = toNum(estimateTarget);
+    if (target == null || target <= 0 || target >= 100) {
       setEstimateError('Enter a margin % between 0 and 100');
       return;
     }
-    const priceMap = {
-      primary_ex_vat:    { value: pf(form.msrp_primary_ex_vat),    currency: form.msrp_primary_currency },
-      primary_inc_vat:   { value: pf(form.msrp_primary_inc_vat),   currency: form.msrp_primary_currency },
-      secondary_ex_vat:  { value: pf(form.msrp_secondary_ex_vat),  currency: form.msrp_secondary_currency },
-      secondary_inc_vat: { value: pf(form.msrp_secondary_inc_vat), currency: form.msrp_secondary_currency },
-    };
-    const { value: priceVal, currency: priceCurrency } = priceMap[form.price_used] || {};
-    if (!priceVal || isNaN(priceVal) || !priceCurrency) {
+    const { value: priceVal, currency: priceCurrency } = resolvePriceUsed(form);
+    if (priceVal == null || !priceCurrency) {
       setEstimateError('Select a price used and fill MSRP first');
       return;
     }
@@ -446,7 +381,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
     if (!form.msrp_primary_currency && (hasPri || !costBased)) { fe.msrp_primary_currency=true; ge.priceData=true; }
     if (costBased && !hasVal(form.exw_cost)) { fe.exw_cost=true; ge.costData=true; }
     if (costBased && form.target_margin_pct !== '' && form.target_margin_pct != null
-        && !(pf(form.target_margin_pct) > 0 && pf(form.target_margin_pct) < 100)) { fe.target_margin_pct=true; ge.priceData=true; }
+        && !(toNum(form.target_margin_pct) > 0 && toNum(form.target_margin_pct) < 100)) { fe.target_margin_pct=true; ge.priceData=true; }
     if (hasSec&&!form.msrp_secondary_currency) { fe.msrp_secondary_currency=true; ge.priceData=true; }
     if (hasPri&&!form.price_used) { fe.price_used=true; ge.priceData=true; }
     if (!hasVal(form.msrp_aed))   { fe.msrp_aed=true; ge.priceData=true; }
@@ -565,9 +500,9 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
           <div style={{display:'flex',flexDirection:'column',gap:0}}>
             <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:1,background:t.b1,borderRadius:8,overflow:'hidden',marginBottom:12}}>
               {[
-                {country:'UAE',price:item.msrp_aed!=null?`AED ${Number(item.msrp_aed).toLocaleString()}`:'—',margin:margins?.uae_margin},
-                {country:'KSA',price:item.msrp_sar!=null?`SAR ${Number(item.msrp_sar).toLocaleString()}`:'—',margin:margins?.ksa_margin},
-                {country:'QAT',price:item.msrp_qat!=null?`QAR ${Number(item.msrp_qat).toLocaleString()}`:'—',margin:margins?.qat_margin},
+                {country:'UAE',price:money(item.msrp_aed,'AED'),margin:margins?.uae_margin},
+                {country:'KSA',price:money(item.msrp_sar,'SAR'),margin:margins?.ksa_margin},
+                {country:'QAT',price:money(item.msrp_qat,'QAR'),margin:margins?.qat_margin},
               ].map(({country,price,margin})=>{
                 const m=formatMargin(margin);
                 return(
@@ -581,7 +516,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
             </div>
             {[
               ['Landed cost',margins?.landed_cost_aed?`AED ${margins.landed_cost_aed.toFixed(2)}`:'—',t.t1],
-              ['Employee price',emp!=null?`AED ${emp.toLocaleString()}`:'—',t.amber],
+              ['Employee price',money(emp,'AED'),t.amber],
               ['Price used',PRICE_USED_OPTIONS.find(o=>o.value===form.price_used)?.label||'—',t.t3],
               ['Item code',itemCode||'—',t.t3],
             ].map(([label,value,color])=>(
@@ -884,10 +819,10 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
                   )}
                   <div style={{height:1,background:t.b2,margin:'16px 0'}}/>
                   <div style={{fontSize:11,color:t.t4,fontFamily:'var(--font-mono)',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:12}}>Recalculated outputs</div>
-                  {[['UAE price',it.msrp_aed!=null?`AED ${Number(it.msrp_aed).toLocaleString()}`:'—',t.t1],
-                    ['KSA price',it.msrp_sar!=null?`SAR ${Number(it.msrp_sar).toLocaleString()}`:'—',t.t1],
-                    ['QAT price',it.msrp_qat!=null?`QAR ${Number(it.msrp_qat).toLocaleString()}`:'—',t.t1],
-                    ['Landed cost',m?.landed_cost_aed!=null?`AED ${m.landed_cost_aed.toFixed(2)}`:'—',t.t2],
+                  {[['UAE price',money(it.msrp_aed,'AED'),t.t1],
+                    ['KSA price',money(it.msrp_sar,'SAR'),t.t1],
+                    ['QAT price',money(it.msrp_qat,'QAR'),t.t1],
+                    ['Landed cost',money(m?.landed_cost_aed,'AED',2),t.t2],
                   ].map(([label,val,color])=>(
                     <div key={label} style={{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:`1px solid ${t.b1}`,fontSize:13}}>
                       <span style={{color:t.t3}}>{label}</span>
@@ -920,10 +855,10 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
                     </div>
                   ))}
                   <div style={{height:1,background:t.b2,margin:'16px 0'}}/>
-                  {[['UAE price',it.msrp_aed!=null?`AED ${Number(it.msrp_aed).toLocaleString()}`:'—',t.t1],
-                    ['KSA price',it.msrp_sar!=null?`SAR ${Number(it.msrp_sar).toLocaleString()}`:'—',t.t1],
-                    ['QAT price',it.msrp_qat!=null?`QAR ${Number(it.msrp_qat).toLocaleString()}`:'—',t.t1],
-                    ['Landed cost',m?.landed_cost_aed!=null?`AED ${m.landed_cost_aed.toFixed(2)}`:'—',t.t2],
+                  {[['UAE price',money(it.msrp_aed,'AED'),t.t1],
+                    ['KSA price',money(it.msrp_sar,'SAR'),t.t1],
+                    ['QAT price',money(it.msrp_qat,'QAR'),t.t1],
+                    ['Landed cost',money(m?.landed_cost_aed,'AED',2),t.t2],
                   ].map(([label,val,color])=>(
                     <div key={label} style={{display:'flex',justifyContent:'space-between',padding:'9px 0',borderBottom:`1px solid ${t.b1}`,fontSize:14}}>
                       <span style={{color:t.t3}}>{label}</span>

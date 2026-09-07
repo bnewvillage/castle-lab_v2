@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
+import { toNum } from '../../lib/num';
 import * as XLSX from 'xlsx-js-style';
 import { fetchItemsByCodes, fetchItemsForOverride, bulkUpdateItemFields, fetchBrands } from '../../lib/db';
 import { suggestKSAPrice, suggestQATPrice } from '../../lib/pricing';
 import { t, inp, btnW, btnG, lbl, groupBox, groupHead } from './styles';
 import BrandSelect from './BrandSelect';
 
-const toNum = (v) => { const n = parseFloat(String(v ?? '').replace(/,/g, '')); return isNaN(n) ? null : n; };
 const pf2   = (v) => (v != null ? parseFloat(v.toFixed(2)) : null);
 const fmt   = (v) => (v === null || v === undefined || v === '' ? '—' : Number(v).toLocaleString());
 

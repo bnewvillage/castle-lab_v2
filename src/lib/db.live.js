@@ -1,17 +1,12 @@
 import { supabase } from './supabase';
+import { toNum } from './num';
+import { BRAND_DEFAULT_FIELDS, brandDefaultsFrom } from './pricing';
 import { orExpression } from './search';
 
 // ── INTERNAL HELPERS ──────────────────────────────────────────
 
-const toNum = (v) => {
-  if (v === '' || v === null || v === undefined) return null;
-  const n = parseFloat(String(v).replace(/,/g, ''));
-  return isNaN(n) ? null : n;
-};
-
 const CHUNK = 500;    // max rows per upsert / .in() batch
 const PAGE  = 10000;  // rows requested per paginated fetch (server may cap lower)
-
 
 function chunkArray(arr, size) {
   const out = [];
@@ -108,6 +103,14 @@ export async function fetchBrandRule(brandCode) {
   const { data, error } = await supabase.from('brand_rules').select('markup_percentage, additional_markup_pct').eq('brand_code', brandCode).single();
   if (error) return null;
   return data;
+}
+
+export async function fetchBrandDefaults(brandCode) {
+  const { data, error } = await supabase.from('pricing_master')
+    .select(BRAND_DEFAULT_FIELDS.join(','))
+    .eq('brand_code', brandCode).order('created_at', { ascending: false }).limit(30);
+  if (error) return null;
+  return brandDefaultsFrom(data);
 }
 
 // ── PRICING MASTER ────────────────────────────────────────────
