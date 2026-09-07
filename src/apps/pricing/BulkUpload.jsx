@@ -35,12 +35,12 @@ async function generateTemplate() {
     'msrp_secondary_ex_vat','msrp_secondary_inc_vat','price_used',
     'target_margin_pct','cost_source','price_source','barcode',
   ];
-  const required = new Set(['sku','brand_code','cost_currency','exw_cost','msrp_primary_currency','price_used']);
+  const required = new Set(['sku','brand_code','cost_currency','msrp_primary_currency','price_used']);
   const descriptions = {
     sku:'SKU without brand prefix — item_code will be constructed as BRAND-SKU',item_name:'Full item description',
     brand_code:'Must exist in Brands tab — see Reference sheet',
     cost_currency:'Currency of EXW cost — see Reference sheet',
-    exw_cost:'Ex-works cost in cost_currency',
+    exw_cost:'Ex-works cost in cost_currency — leave blank or 0 if none was supplied',
     shipping_rate:'Shipping % applied to EXW cost (default: 0)',
     customs_duty_rate:'Customs duty % (default: 5.5)',
     msrp_primary_currency:'Currency of primary MSRP',
@@ -104,7 +104,8 @@ function validateAndCalc(row, brandMap, markupCache, additionalMarkupCache, rate
   if (!brandCode)               errors.push('brand_code is required');
   else if (!brandMap[brandCode]) errors.push(`Brand "${brandCode}" not found — create it in Brands tab first`);
   if (!row.cost_currency)       errors.push('cost_currency is required');
-  if (!row.exw_cost || toNum(row.exw_cost) == null) errors.push('exw_cost must be a number');
+  // Cost is optional — vendors don't always send one — but must parse when present.
+  if (String(row.exw_cost ?? '').trim() !== '' && toNum(row.exw_cost) == null) errors.push('exw_cost must be a number');
   const isCostBased = row.price_used === 'cost_based';
   if (!row.msrp_primary_currency && !isCostBased) errors.push('msrp_primary_currency is required');
   if (!row.price_used || !PRICE_USED_OPTIONS.includes(row.price_used)) {
@@ -124,7 +125,7 @@ function validateAndCalc(row, brandMap, markupCache, additionalMarkupCache, rate
     secondary_inc_vat: { value: toNum(row.msrp_secondary_inc_vat), currency: row.msrp_secondary_currency },
   };
   const { value: priceVal, currency: priceCurrency } = priceUsedMap[row.price_used] || {};
-  if (!isCostBased && errors.length === 0 && (!priceVal || isNaN(priceVal))) {
+  if (!isCostBased && errors.length === 0 && (priceVal == null || isNaN(priceVal))) {
     errors.push(`No MSRP value found for price_used "${row.price_used}"`);
   }
   const targetMargin = toNum(row.target_margin_pct);
@@ -886,8 +887,8 @@ export default function BulkUpload({ onToast }) {
       return total > 0 ? Math.round((filled / total) * 100) : 0;
     };
 
-    const REQUIRED_COLS = ['item_code','item_name','brand_code','cost_currency','exw_cost','msrp_primary_currency','price_used'];
-    const OPTIONAL_COLS = ['barcode','shipping_rate','customs_duty_rate','target_margin_pct','cost_source','price_source'];
+    const REQUIRED_COLS = ['item_code','item_name','brand_code','cost_currency','msrp_primary_currency','price_used'];
+    const OPTIONAL_COLS = ['barcode','exw_cost','shipping_rate','customs_duty_rate','target_margin_pct','cost_source','price_source'];
 
     // EXW margin on ALL rows: (price_used_aed - exw_cost_aed) / price_used_aed
     const marginStats = (() => {
@@ -1655,7 +1656,7 @@ export default function BulkUpload({ onToast }) {
         <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
           {[
             {col:'sku',req:true},{col:'item_name',req:false},{col:'brand_code',req:true},
-            {col:'cost_currency',req:true},{col:'exw_cost',req:true},
+            {col:'cost_currency',req:true},{col:'exw_cost',req:false},
             {col:'msrp_primary_currency',req:true},{col:'price_used',req:true},
             {col:'shipping_rate',req:false},{col:'customs_duty_rate',req:false},
             {col:'msrp_primary_ex_vat',req:false},{col:'msrp_primary_inc_vat',req:false},

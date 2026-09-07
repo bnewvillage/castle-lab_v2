@@ -17,7 +17,7 @@ export function compoundMarkup(base, additional) {
  * exw_cost (vendor currency) × (1 + shipping_rate%) × FX rate × (1 + customs_duty_rate%)
  */
 export function calcLandedCost({ exw_cost, shipping_rate, customs_duty_rate, cost_currency }, rates) {
-  if (!exw_cost || !cost_currency || !rates?.[cost_currency]) return null;
+  if (exw_cost == null || exw_cost === '' || !cost_currency || !rates?.[cost_currency]) return null;
   const afterShipping = exw_cost * (1 + (shipping_rate || 0) / 100);
   const inAED = afterShipping * rates[cost_currency];
   return inAED * (1 + (customs_duty_rate ?? 5.5) / 100);
@@ -49,9 +49,9 @@ export function resolvePriceUsed(item) {
  * exw_margin     = (price_used_aed - cost_aed) / price_used_aed × 100
  */
 export function calcEXWMargin(item, rates) {
-  if (!item.exw_cost || !item.cost_currency || !rates?.[item.cost_currency]) return null;
+  if (item.exw_cost == null || !item.cost_currency || !rates?.[item.cost_currency]) return null;
   const { value, currency } = resolvePriceUsed(item);
-  if (!value || !currency || !rates?.[currency]) return null;
+  if (value == null || !currency || !rates?.[currency]) return null;
   const priceAED = value * rates[currency];
   const costAED  = item.exw_cost * rates[item.cost_currency];
   if (!priceAED || priceAED <= 0) return null;
@@ -65,7 +65,7 @@ export function calcEXWMargin(item, rates) {
  * (selling_price_aed - cost_aed) / selling_price_aed × 100
  */
 export function calcMargin(sellingPriceAED, costAED) {
-  if (!sellingPriceAED || !costAED || sellingPriceAED <= 0) return null;
+  if (sellingPriceAED == null || costAED == null || sellingPriceAED <= 0) return null;
   return ((sellingPriceAED - costAED) / sellingPriceAED) * 100;
 }
 
@@ -106,7 +106,7 @@ export function removeMOD(ceiled) {
 // ── SUGGESTED PRICES ─────────────────────────────────────────
 
 export function suggestUAEPrice(priceUsedValue, priceCurrency, markupPercentage, rates) {
-  if (!priceUsedValue || !priceCurrency || !rates?.[priceCurrency]) return null;
+  if (priceUsedValue == null || !priceCurrency || !rates?.[priceCurrency]) return null;
   const inAED    = priceUsedValue * rates[priceCurrency];
   const markedUp = inAED * (1 + markupPercentage / 100);
   const vatted   = markedUp * 1.05;
@@ -116,7 +116,7 @@ export function suggestUAEPrice(priceUsedValue, priceCurrency, markupPercentage,
 }
 
 export function suggestKSAPrice(msrp_aed) {
-  if (!msrp_aed) return null;
+  if (msrp_aed == null) return null;
   const raw    = msrp_aed * 1.03 * 1.15;
   const ceiled = Math.ceil(raw / 5) * 5;
   const modded = String(ceiled).slice(-2) === '00' ? ceiled - 0.05 : ceiled;
@@ -124,7 +124,7 @@ export function suggestKSAPrice(msrp_aed) {
 }
 
 export function suggestQATPrice(msrp_aed) {
-  if (!msrp_aed) return null;
+  if (msrp_aed == null) return null;
   const raw    = msrp_aed * 1.01;
   const ceiled = Math.ceil(raw / 5) * 5;
   return String(ceiled).slice(-2) === '00' ? ceiled - 0.05 : ceiled;
@@ -172,7 +172,7 @@ export const DEFAULT_COST_MARGIN_PCT = 25;
  * KSA/QAT derived from the final AED via the standard formulas.
  */
 export function calcCostBasedMSRPs(exwCost, costCurrency, targetMarginPct, rates, additionalMarkupPct = null) {
-  if (!exwCost || !costCurrency || !rates?.[costCurrency]) return null;
+  if (exwCost == null || !costCurrency || !rates?.[costCurrency]) return null;
   const margin = (targetMarginPct ?? DEFAULT_COST_MARGIN_PCT) / 100;
   if (!(margin > 0 && margin < 1)) return null;
   const pf2           = v => v != null ? parseFloat(v.toFixed(2)) : null;
@@ -195,7 +195,7 @@ export function calcCostBasedMSRPs(exwCost, costCurrency, targetMarginPct, rates
 
 export function calcEmployeePrice(item, rates) {
   const landed = calcLandedCost(item, rates);
-  if (!landed) return null;
+  if (landed == null) return null;
   return Math.floor(landed * 1.15 * 1.05);
 }
 
@@ -227,7 +227,7 @@ export const DEFAULT_PROJECT_MARGIN_PCT = 25;
  * Returns { msrp_aed_inc_vat, msrp_aed_ex_vat, landed_cost_aed } or null.
  */
 export function calcProjectPrice({ cost, cost_currency, shipping_rate, customs_duty_rate, target_margin_pct }, rates) {
-  if (!cost || !cost_currency || !rates?.[cost_currency]) return null;
+  if (cost == null || cost === '' || !cost_currency || !rates?.[cost_currency]) return null;
   const margin            = (target_margin_pct ?? DEFAULT_PROJECT_MARGIN_PCT) / 100;
   if (!(margin > 0 && margin < 1)) return null;
   const rate              = rates[cost_currency];

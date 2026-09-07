@@ -12,7 +12,10 @@ import { useAuth } from '../../lib/AuthContext';
 
 // Strip commas from Excel-formatted numbers
 const pf = (v) => parseFloat(String(v ?? '').replace(/,/g, ''));
-const hasVal = (v) => v !== '' && v !== null && v !== undefined && !isNaN(pf(v)) && pf(v) !== 0;
+// Zero is a legitimate cost/price, so only a blank or non-numeric entry counts as missing.
+const hasVal = (v) => v !== '' && v !== null && v !== undefined && !isNaN(pf(v));
+// Preserves 0 while mapping blank/non-numeric to null for the database.
+const numOrNull = (v) => (v === null || v === undefined || isNaN(v)) ? null : v;
 
 // ── FORM CACHE (cost_currency + shipping_rate, 1h TTL) ───────
 const FORM_CACHE_KEY = 'prjt_form_defaults';
@@ -109,7 +112,7 @@ export default function ProjectItems({ rates, setExportActions, onToast, isActiv
     }, rates) : null;
     const landedAED = result?.landed_cost_aed ?? null;
     const exVat     = item.msrp_aed_ex_vat;
-    const margin    = (exVat > 0 && landedAED > 0)
+    const margin    = (exVat > 0 && landedAED != null)
       ? parseFloat(((exVat - landedAED) / exVat * 100).toFixed(2))
       : null;
     return {
@@ -164,8 +167,8 @@ export default function ProjectItems({ rates, setExportActions, onToast, isActiv
           target_margin_pct: merged.target_margin_pct,
           msrp_aed_inc_vat:  item.uae_overridden ? item.msrp_aed_inc_vat : (priced?.msrp_aed_inc_vat ?? null),
           msrp_aed_ex_vat:   exVat,
-          msrp_sar: item.ksa_overridden ? item.msrp_sar : (exVat > 0 ? parseFloat((suggestKSAPrice(exVat) || 0).toFixed(2)) : null),
-          msrp_qat: item.qat_overridden ? item.msrp_qat : (exVat > 0 ? parseFloat((suggestQATPrice(exVat) || 0).toFixed(2)) : null),
+          msrp_sar: item.ksa_overridden ? item.msrp_sar : (exVat != null ? parseFloat((suggestKSAPrice(exVat) ?? 0).toFixed(2)) : null),
+          msrp_qat: item.qat_overridden ? item.msrp_qat : (exVat != null ? parseFloat((suggestQATPrice(exVat) ?? 0).toFixed(2)) : null),
         };
       });
       await bulkUpdateProjectItems(updates);
@@ -354,21 +357,21 @@ export default function ProjectItems({ rates, setExportActions, onToast, isActiv
                   </span>
                   <div>
                     <span style={{ fontSize:13, color:t.t1, fontFamily:'var(--font-mono)' }}>
-                      {item.msrp_aed_inc_vat ? `AED ${Number(item.msrp_aed_inc_vat).toLocaleString()}` : '—'}
+                      {item.msrp_aed_inc_vat != null ? `AED ${Number(item.msrp_aed_inc_vat).toLocaleString()}` : '—'}
                     </span>
                     {item.uae_overridden && (
                       <span style={{ fontSize:10, color:t.amber, marginLeft:6, fontFamily:'var(--font-mono)' }}>override</span>
                     )}
                   </div>
                   <span style={{ fontSize:12, color:t.t2, fontFamily:'var(--font-mono)' }}>
-                    {item.msrp_aed_ex_vat ? `AED ${Number(item.msrp_aed_ex_vat).toFixed(2)}` : '—'}
+                    {item.msrp_aed_ex_vat != null ? `AED ${Number(item.msrp_aed_ex_vat).toFixed(2)}` : '—'}
                   </span>
                   <span style={{ fontSize:12, color:t.t3, fontFamily:'var(--font-mono)' }}>
-                    {item.msrp_sar ? `SAR ${Number(item.msrp_sar).toFixed(2)}` : '—'}
+                    {item.msrp_sar != null ? `SAR ${Number(item.msrp_sar).toFixed(2)}` : '—'}
                     {item.ksa_overridden && <span style={{ fontSize:9, color:t.amber, marginLeft:4 }}>↑</span>}
                   </span>
                   <span style={{ fontSize:12, color:t.t3, fontFamily:'var(--font-mono)' }}>
-                    {item.msrp_qat ? `QAR ${Number(item.msrp_qat).toFixed(2)}` : '—'}
+                    {item.msrp_qat != null ? `QAR ${Number(item.msrp_qat).toFixed(2)}` : '—'}
                     {item.qat_overridden && <span style={{ fontSize:9, color:t.amber, marginLeft:4 }}>↑</span>}
                   </span>
                   <span style={{ fontSize:12, color:t.t3, fontFamily:'var(--font-mono)' }}>
@@ -439,7 +442,7 @@ function ProjectItemForm({ rates, existing, existingCodes, onSave, onFail, onCan
   useEffect(() => {
     if (form.uae_overridden) return;
     const cost = pf(form.cost);
-    if (!cost || cost <= 0 || !form.cost_currency || !rates?.[form.cost_currency]) {
+    if (isNaN(cost) || cost < 0 || !form.cost_currency || !rates?.[form.cost_currency]) {
       setForm(f => ({ ...f, msrp_aed_inc_vat: '', msrp_aed_ex_vat: '' }));
       return;
     }
@@ -462,14 +465,14 @@ function ProjectItemForm({ rates, existing, existingCodes, onSave, onFail, onCan
   // ── Auto-suggest SAR/QAT from AED ex_vat whenever it changes ──
   useEffect(() => {
     const exVat = pf(form.msrp_aed_ex_vat);
-    if (!exVat || exVat <= 0) {
+    if (isNaN(exVat) || exVat < 0) {
       setForm(f => ({ ...f, msrp_sar: f.ksa_overridden ? f.msrp_sar : '', msrp_qat: f.qat_overridden ? f.msrp_qat : '' }));
       return;
     }
     setForm(f => ({
       ...f,
-      msrp_sar: f.ksa_overridden ? f.msrp_sar : parseFloat((suggestKSAPrice(exVat) || 0).toFixed(2)),
-      msrp_qat: f.qat_overridden ? f.msrp_qat : parseFloat((suggestQATPrice(exVat) || 0).toFixed(2)),
+      msrp_sar: f.ksa_overridden ? f.msrp_sar : parseFloat((suggestKSAPrice(exVat) ?? 0).toFixed(2)),
+      msrp_qat: f.qat_overridden ? f.msrp_qat : parseFloat((suggestQATPrice(exVat) ?? 0).toFixed(2)),
     }));
   }, [form.msrp_aed_ex_vat]);
 
@@ -480,13 +483,13 @@ function ProjectItemForm({ rates, existing, existingCodes, onSave, onFail, onCan
   useEffect(() => {
     if (form.ksa_overridden) return;
     const exVat = pf(form.msrp_aed_ex_vat);
-    if (exVat > 0) setForm(f => ({ ...f, msrp_sar: parseFloat((suggestKSAPrice(exVat) || 0).toFixed(2)) }));
+    if (!isNaN(exVat) && exVat >= 0) setForm(f => ({ ...f, msrp_sar: parseFloat((suggestKSAPrice(exVat) ?? 0).toFixed(2)) }));
   }, [form.ksa_overridden]); // intentional: msrp_aed_ex_vat omitted — handled by suggestion effect above
 
   useEffect(() => {
     if (form.qat_overridden) return;
     const exVat = pf(form.msrp_aed_ex_vat);
-    if (exVat > 0) setForm(f => ({ ...f, msrp_qat: parseFloat((suggestQATPrice(exVat) || 0).toFixed(2)) }));
+    if (!isNaN(exVat) && exVat >= 0) setForm(f => ({ ...f, msrp_qat: parseFloat((suggestQATPrice(exVat) ?? 0).toFixed(2)) }));
   }, [form.qat_overridden]); // intentional: msrp_aed_ex_vat omitted — handled by suggestion effect above
 
   useEffect(() => {
@@ -501,7 +504,7 @@ function ProjectItemForm({ rates, existing, existingCodes, onSave, onFail, onCan
   const qatVal     = pf(form.msrp_qat);
 
   // Landed cost always computed from cost inputs (regardless of override)
-  const landedResult = (costVal > 0 && form.cost_currency && rates?.[form.cost_currency])
+  const landedResult = (!isNaN(costVal) && costVal >= 0 && form.cost_currency && rates?.[form.cost_currency])
     ? calcProjectPrice({
         cost:              costVal,
         cost_currency:     form.cost_currency,
@@ -528,7 +531,7 @@ function ProjectItemForm({ rates, existing, existingCodes, onSave, onFail, onCan
   const validate = () => {
     const fe = {};
     if (!form.sku_suffix?.trim())                       fe.sku_suffix     = true;
-    if (!costVal || isNaN(costVal) || costVal <= 0)     fe.cost           = true;
+    if (isNaN(costVal) || costVal < 0)                  fe.cost           = true;
     if (!form.cost_currency)                            fe.cost_currency  = true;
     const mg = pf(form.target_margin_pct);
     if (!(mg > 0 && mg < 100))                          fe.target_margin_pct = true;
@@ -561,10 +564,10 @@ function ProjectItemForm({ rates, existing, existingCodes, onSave, onFail, onCan
         shipping_rate:     pf(form.shipping_rate) || 0,
         customs_duty_rate: pf(form.customs_duty_rate) ?? 5.5,
         target_margin_pct: pf(form.target_margin_pct) || DEFAULT_PROJECT_MARGIN_PCT,
-        msrp_aed_inc_vat:  incVat || null,
-        msrp_aed_ex_vat:   exVat  || null,
-        msrp_sar:          pf(form.msrp_sar) || null,
-        msrp_qat:          pf(form.msrp_qat) || null,
+        msrp_aed_inc_vat:  numOrNull(incVat),
+        msrp_aed_ex_vat:   numOrNull(exVat),
+        msrp_sar:          numOrNull(pf(form.msrp_sar)),
+        msrp_qat:          numOrNull(pf(form.msrp_qat)),
         uae_overridden:    form.uae_overridden,
         ksa_overridden:    form.ksa_overridden,
         qat_overridden:    form.qat_overridden,
@@ -779,9 +782,9 @@ function ProjectItemForm({ rates, existing, existingCodes, onSave, onFail, onCan
 
               {[
                 ['Ex VAT (AED)',                    hasVal(form.msrp_aed_ex_vat) ? `AED ${exVatVal.toFixed(2)}`        : '—', t.t2],
-                ['Landed cost (AED)',               landedAED                    ? `AED ${landedAED.toFixed(2)}`        : '—', t.t3],
-                [`Cost ex customs (${srcCur})`,     costExCustomsSrc             ? `${srcCur} ${costExCustomsSrc.toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 })}` : '—', t.t3],
-                [`Landed cost (${srcCur})`,         landedSrc                    ? `${srcCur} ${landedSrc.toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 })}` : '—', t.t3],
+                ['Landed cost (AED)',               landedAED != null            ? `AED ${landedAED.toFixed(2)}`        : '—', t.t3],
+                [`Cost ex customs (${srcCur})`,     costExCustomsSrc != null      ? `${srcCur} ${costExCustomsSrc.toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 })}` : '—', t.t3],
+                [`Landed cost (${srcCur})`,         landedSrc != null             ? `${srcCur} ${landedSrc.toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 })}` : '—', t.t3],
                 ['Gross margin',                    marginFmt.label,                                                                                                                             MARGIN_COLORS[marginFmt.status]],
                 ['Item code',                       itemCode || '—',                                                                                                                                 t.t3],
               ].map(([label, value, color]) => (
@@ -948,11 +951,11 @@ function ProjectItemForm({ rates, existing, existingCodes, onSave, onFail, onCan
             {[
               ['Item code',        itemCode],
               ['Item name',        form.project_item_name || '—'],
-              ['Cost',             `${form.cost_currency} ${costVal ? costVal.toLocaleString() : '—'}`],
+              ['Cost',             `${form.cost_currency} ${isNaN(costVal) ? '—' : costVal.toLocaleString()}`],
               ['Shipping',         `${pf(form.shipping_rate) || 0}%`],
               ['Customs duty',     `${pf(form.customs_duty_rate) ?? 5.5}%`],
               ['Target margin',    `${pf(form.target_margin_pct) || DEFAULT_PROJECT_MARGIN_PCT}%`],
-              ['Landed cost',      landedAED ? `AED ${landedAED.toFixed(2)}` : '—'],
+              ['Landed cost',      landedAED != null ? `AED ${landedAED.toFixed(2)}` : '—'],
               ['UAE inc VAT',  hasVal(form.msrp_aed_inc_vat) ? `AED ${incVatVal.toLocaleString()}` : '—'],
               ['UAE ex VAT',   hasVal(form.msrp_aed_ex_vat)  ? `AED ${exVatVal.toFixed(2)}`       : '—'],
               ['KSA (SAR)',    hasVal(form.msrp_sar) ? `SAR ${sarVal.toFixed(2)}` : '—'],

@@ -130,9 +130,9 @@ function InlineSummary({ item, rates }) {
                 Current pricing
               </div>
               {[
-                ['UAE', item.msrp_aed?`AED ${fmtNum(item.msrp_aed)}`:'—', margins?.uae_margin],
-                ['KSA', item.msrp_sar?`SAR ${fmtNum(item.msrp_sar)}`:'—', margins?.ksa_margin],
-                ['QAT', item.msrp_qat?`QAR ${fmtNum(item.msrp_qat)}`:'—', margins?.qat_margin],
+                ['UAE', item.msrp_aed!=null?`AED ${fmtNum(item.msrp_aed)}`:'—', margins?.uae_margin],
+                ['KSA', item.msrp_sar!=null?`SAR ${fmtNum(item.msrp_sar)}`:'—', margins?.ksa_margin],
+                ['QAT', item.msrp_qat!=null?`QAR ${fmtNum(item.msrp_qat)}`:'—', margins?.qat_margin],
               ].map(([country, price, margin]) => {
                 const m = formatMargin(margin);
                 return (
@@ -147,7 +147,7 @@ function InlineSummary({ item, rates }) {
               })}
               <div style={rowStyle}>
                 <span style={labelStyle}>Landed cost</span>
-                <span style={valStyle}>{margins?.landed_cost_aed?`AED ${margins.landed_cost_aed.toFixed(2)}`:'—'}</span>
+                <span style={valStyle}>{margins?.landed_cost_aed!=null?`AED ${margins.landed_cost_aed.toFixed(2)}`:'—'}</span>
               </div>
               {(() => {
                 const exwFmt = formatMargin(margins?.exw_margin);
@@ -163,7 +163,7 @@ function InlineSummary({ item, rates }) {
               })()}
               <div style={{ ...rowStyle, borderBottom:'none' }}>
                 <span style={labelStyle}>Employee price</span>
-                <span style={{ ...valStyle, color:t.amber }}>{emp?`AED ${emp.toLocaleString()}`:'—'}</span>
+                <span style={{ ...valStyle, color:t.amber }}>{emp!=null?`AED ${emp.toLocaleString()}`:'—'}</span>
               </div>
             </div>
 
@@ -493,12 +493,12 @@ export default function ItemList({ rates, brands, onEditItem, maximized, setExpo
                         <td style={{ ...td(false), color:t.t3 }}>{msrp.currency||'—'}</td>
                         <td style={{ ...td(false), textAlign:'right' }}>{fmtNum(item.exw_cost)}</td>
                         <td style={{ ...td(false), color:t.t3 }}>{item.cost_currency||'—'}</td>
-                        <td style={{ ...td(true), textAlign:'right' }}>{item.msrp_aed?`AED ${fmtNum(item.msrp_aed)}`:'—'}</td>
-                        <td style={{ ...td(false), textAlign:'right' }}>{item.msrp_sar?`SAR ${fmtNum(item.msrp_sar)}`:'—'}</td>
-                        <td style={{ ...td(false), textAlign:'right' }}>{item.msrp_qat?`QAR ${fmtNum(item.msrp_qat)}`:'—'}</td>
+                        <td style={{ ...td(true), textAlign:'right' }}>{item.msrp_aed!=null?`AED ${fmtNum(item.msrp_aed)}`:'—'}</td>
+                        <td style={{ ...td(false), textAlign:'right' }}>{item.msrp_sar!=null?`SAR ${fmtNum(item.msrp_sar)}`:'—'}</td>
+                        <td style={{ ...td(false), textAlign:'right' }}>{item.msrp_qat!=null?`QAR ${fmtNum(item.msrp_qat)}`:'—'}</td>
                         <td style={{ ...td(false), textAlign:'right', color:t.t3 }}>{item.shipping_rate??'—'}</td>
                         <td style={{ ...td(false), textAlign:'right', color:t.t3 }}>{item.customs_duty_rate??'—'}</td>
-                        <td style={{ ...td(false), textAlign:'right' }}>{landed?`AED ${landed.toFixed(2)}`:'—'}</td>
+                        <td style={{ ...td(false), textAlign:'right' }}>{landed!=null?`AED ${landed.toFixed(2)}`:'—'}</td>
                         <td style={{ ...td(false), textAlign:'right', color:MARGIN_COLORS[m.status], fontWeight:600 }}>{m.label}</td>
                         <td style={{ ...td(false), color:t.t3 }}>{item.price_source||'—'}</td>
                         <td style={{ ...td(false), color:t.t3 }}>{item.cost_source||'—'}</td>

@@ -165,9 +165,9 @@ export default function SingleSKU({ rates, brands, editTarget, onEditTargetConsu
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:1, background:t.b1 }}>
               {[
-                {country:'UAE',price:selected.msrp_aed?`AED ${selected.msrp_aed.toLocaleString()}`:'—',margin:margins?.uae_margin},
-                {country:'KSA',price:selected.msrp_sar?`SAR ${selected.msrp_sar.toLocaleString()}`:'—',margin:margins?.ksa_margin},
-                {country:'QAT',price:selected.msrp_qat?`QAR ${selected.msrp_qat.toLocaleString()}`:'—',margin:margins?.qat_margin},
+                {country:'UAE',price:selected.msrp_aed!=null?`AED ${selected.msrp_aed.toLocaleString()}`:'—',margin:margins?.uae_margin},
+                {country:'KSA',price:selected.msrp_sar!=null?`SAR ${selected.msrp_sar.toLocaleString()}`:'—',margin:margins?.ksa_margin},
+                {country:'QAT',price:selected.msrp_qat!=null?`QAR ${selected.msrp_qat.toLocaleString()}`:'—',margin:margins?.qat_margin},
               ].map(({country,price,margin}) => {
                 const m=formatMargin(margin);
                 return (
@@ -183,7 +183,7 @@ export default function SingleSKU({ rates, brands, editTarget, onEditTargetConsu
               const exwFmt = formatMargin(margins?.exw_margin);
               return (
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:1, background:t.b1 }}>
-                  <div style={{ background:t.bg2, padding:'14px 20px' }}><div style={{ fontSize:11, color:t.t4, fontFamily:'var(--font-mono)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:5 }}>EXW cost</div><div style={{ fontSize:13, color:t.t2 }}>{selected.cost_currency} {selected.exw_cost?.toLocaleString()||'—'}</div></div>
+                  <div style={{ background:t.bg2, padding:'14px 20px' }}><div style={{ fontSize:11, color:t.t4, fontFamily:'var(--font-mono)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:5 }}>EXW cost</div><div style={{ fontSize:13, color:t.t2 }}>{selected.cost_currency} {selected.exw_cost!=null?selected.exw_cost.toLocaleString():'—'}</div></div>
                   <div style={{ background:t.bg2, padding:'14px 20px' }}><div style={{ fontSize:11, color:t.t4, fontFamily:'var(--font-mono)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:5 }}>EXW margin</div><div style={{ fontSize:13, fontWeight:500, color:MARGIN_COLORS[exwFmt.status] }}>{exwFmt.label}</div><div style={{ fontSize:10, color:t.t4, marginTop:2 }}>price used vs cost · no markup</div></div>
                   <div style={{ background:t.bg2, padding:'14px 20px' }}><div style={{ fontSize:11, color:t.t4, fontFamily:'var(--font-mono)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:5 }}>Landed cost</div><div style={{ fontSize:13, fontWeight:500, color:t.t1 }}>{margins?.landed_cost_aed?`AED ${margins.landed_cost_aed.toFixed(2)}`:'—'}</div></div>
                   <div style={{ background:t.bg2, padding:'14px 20px' }}><div style={{ fontSize:11, color:t.t4, fontFamily:'var(--font-mono)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:5 }}>Employee price</div><div style={{ fontSize:13, color:t.amber }}>AED {emp?.toLocaleString()||'—'}</div></div>
@@ -287,7 +287,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
       secondary_inc_vat: { value: pf(form.msrp_secondary_inc_vat), currency: form.msrp_secondary_currency },
     };
     const { value, currency } = map[form.price_used] || {};
-    if (!value || !currency) return;
+    if (value == null || isNaN(value) || !currency) return;
     const effectiveMarkup = compoundMarkup(markup, additionalMarkup ?? 0);
     const uae = suggestUAEPrice(value, currency, effectiveMarkup, rates);
     if (!uae) return;
@@ -354,7 +354,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
       secondary_inc_vat: {value:pf(form.msrp_secondary_inc_vat),currency:form.msrp_secondary_currency},
     };
     const {value,currency} = map[form.price_used]||{};
-    if (!value||!currency) return;
+    if (value == null || isNaN(value) || !currency) return;
     const msrps = calcMSRPs(value, currency, markup, additionalMarkup ?? null, rates);
     if (!msrps) return;
     setForm(f => {
@@ -373,7 +373,9 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
       form.msrp_secondary_ex_vat,form.msrp_secondary_inc_vat,form.msrp_secondary_currency,
       form.exw_cost,form.cost_currency,form.target_margin_pct,markup,additionalMarkup,viewMode]);
 
-  const hasVal = v => v!==''&&v!==null&&v!==undefined&&!isNaN(pf(v))&&pf(v)!==0;
+  // Zero is a legitimate cost/price (not-for-sale items, costs never supplied),
+  // so only a blank or non-numeric entry counts as missing.
+  const hasVal = v => v!==''&&v!==null&&v!==undefined&&!isNaN(pf(v));
   const availablePriceUsed = PRICE_USED_OPTIONS.filter(o => hasVal(form[o.needs]));
   const priceUsedOptions   = availablePriceUsed.length>0 ? availablePriceUsed : PRICE_USED_OPTIONS;
   const itemCode = form.brand_code&&form.sku_suffix ? `${form.brand_code}-${form.sku_suffix}` : '';
@@ -457,7 +459,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
     const {fe,ge} = validate();
     setFieldErrs(fe); setGroupErrs(ge);
     if (Object.keys(fe).length>0) return;
-    if (!asItem().exw_cost) { setModal('zeroCost'); return; }
+    if (asItem().exw_cost == null) { setModal('zeroCost'); return; }
     setModal('summary');
   };
 
@@ -563,9 +565,9 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
           <div style={{display:'flex',flexDirection:'column',gap:0}}>
             <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:1,background:t.b1,borderRadius:8,overflow:'hidden',marginBottom:12}}>
               {[
-                {country:'UAE',price:item.msrp_aed?`AED ${Number(item.msrp_aed).toLocaleString()}`:'—',margin:margins?.uae_margin},
-                {country:'KSA',price:item.msrp_sar?`SAR ${Number(item.msrp_sar).toLocaleString()}`:'—',margin:margins?.ksa_margin},
-                {country:'QAT',price:item.msrp_qat?`QAR ${Number(item.msrp_qat).toLocaleString()}`:'—',margin:margins?.qat_margin},
+                {country:'UAE',price:item.msrp_aed!=null?`AED ${Number(item.msrp_aed).toLocaleString()}`:'—',margin:margins?.uae_margin},
+                {country:'KSA',price:item.msrp_sar!=null?`SAR ${Number(item.msrp_sar).toLocaleString()}`:'—',margin:margins?.ksa_margin},
+                {country:'QAT',price:item.msrp_qat!=null?`QAR ${Number(item.msrp_qat).toLocaleString()}`:'—',margin:margins?.qat_margin},
               ].map(({country,price,margin})=>{
                 const m=formatMargin(margin);
                 return(
@@ -579,7 +581,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
             </div>
             {[
               ['Landed cost',margins?.landed_cost_aed?`AED ${margins.landed_cost_aed.toFixed(2)}`:'—',t.t1],
-              ['Employee price',emp?`AED ${emp.toLocaleString()}`:'—',t.amber],
+              ['Employee price',emp!=null?`AED ${emp.toLocaleString()}`:'—',t.amber],
               ['Price used',PRICE_USED_OPTIONS.find(o=>o.value===form.price_used)?.label||'—',t.t3],
               ['Item code',itemCode||'—',t.t3],
             ].map(([label,value,color])=>(
@@ -797,8 +799,8 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
           initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} onClick={()=>setModal(null)}>
           <motion.div style={{background:'#111',border:`1px solid ${t.b2}`,borderRadius:16,padding:'28px 32px',width:'100%',maxWidth:440}}
             initial={{scale:0.95,opacity:0}} animate={{scale:1,opacity:1}} exit={{scale:0.95,opacity:0}} onClick={e=>e.stopPropagation()}>
-            <div style={{fontSize:18,fontWeight:500,color:t.t1,marginBottom:8}}>Confirm zero cost</div>
-            <div style={{fontSize:14,color:t.t3,marginBottom:24,lineHeight:1.6}}>No EXW cost was entered. Margin calculations won't be available for this item. Continue anyway?</div>
+            <div style={{fontSize:18,fontWeight:500,color:t.t1,marginBottom:8}}>No cost entered</div>
+            <div style={{fontSize:14,color:t.t3,marginBottom:24,lineHeight:1.6}}>The EXW cost field is blank, so margin calculations won't be available for this item. Enter 0 if the item genuinely has no cost, or continue to save it without one.</div>
             <div style={{display:'flex',justifyContent:'flex-end',gap:10}}>
               <button style={btnG} onClick={()=>setModal(null)}>Go back</button>
               <button style={btnW} onClick={()=>setModal('summary')}>Continue</button>
@@ -882,10 +884,10 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
                   )}
                   <div style={{height:1,background:t.b2,margin:'16px 0'}}/>
                   <div style={{fontSize:11,color:t.t4,fontFamily:'var(--font-mono)',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:12}}>Recalculated outputs</div>
-                  {[['UAE price',it.msrp_aed?`AED ${Number(it.msrp_aed).toLocaleString()}`:'—',t.t1],
-                    ['KSA price',it.msrp_sar?`SAR ${Number(it.msrp_sar).toLocaleString()}`:'—',t.t1],
-                    ['QAT price',it.msrp_qat?`QAR ${Number(it.msrp_qat).toLocaleString()}`:'—',t.t1],
-                    ['Landed cost',m?.landed_cost_aed?`AED ${m.landed_cost_aed.toFixed(2)}`:'—',t.t2],
+                  {[['UAE price',it.msrp_aed!=null?`AED ${Number(it.msrp_aed).toLocaleString()}`:'—',t.t1],
+                    ['KSA price',it.msrp_sar!=null?`SAR ${Number(it.msrp_sar).toLocaleString()}`:'—',t.t1],
+                    ['QAT price',it.msrp_qat!=null?`QAR ${Number(it.msrp_qat).toLocaleString()}`:'—',t.t1],
+                    ['Landed cost',m?.landed_cost_aed!=null?`AED ${m.landed_cost_aed.toFixed(2)}`:'—',t.t2],
                   ].map(([label,val,color])=>(
                     <div key={label} style={{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:`1px solid ${t.b1}`,fontSize:13}}>
                       <span style={{color:t.t3}}>{label}</span>
@@ -918,10 +920,10 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
                     </div>
                   ))}
                   <div style={{height:1,background:t.b2,margin:'16px 0'}}/>
-                  {[['UAE price',it.msrp_aed?`AED ${Number(it.msrp_aed).toLocaleString()}`:'—',t.t1],
-                    ['KSA price',it.msrp_sar?`SAR ${Number(it.msrp_sar).toLocaleString()}`:'—',t.t1],
-                    ['QAT price',it.msrp_qat?`QAR ${Number(it.msrp_qat).toLocaleString()}`:'—',t.t1],
-                    ['Landed cost',m?.landed_cost_aed?`AED ${m.landed_cost_aed.toFixed(2)}`:'—',t.t2],
+                  {[['UAE price',it.msrp_aed!=null?`AED ${Number(it.msrp_aed).toLocaleString()}`:'—',t.t1],
+                    ['KSA price',it.msrp_sar!=null?`SAR ${Number(it.msrp_sar).toLocaleString()}`:'—',t.t1],
+                    ['QAT price',it.msrp_qat!=null?`QAR ${Number(it.msrp_qat).toLocaleString()}`:'—',t.t1],
+                    ['Landed cost',m?.landed_cost_aed!=null?`AED ${m.landed_cost_aed.toFixed(2)}`:'—',t.t2],
                   ].map(([label,val,color])=>(
                     <div key={label} style={{display:'flex',justifyContent:'space-between',padding:'9px 0',borderBottom:`1px solid ${t.b1}`,fontSize:14}}>
                       <span style={{color:t.t3}}>{label}</span>
