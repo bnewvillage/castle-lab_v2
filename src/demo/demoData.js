@@ -191,7 +191,8 @@ function seed() {
   const projectItems = PROJ.map(([item_code, project_item_name, cost_currency, cost]) => {
     const shipping_rate = pick(projRng, [0, 5, 7.5]);
     const customs_duty_rate = pick(projRng, [5, 5.5]);
-    const priced = calcProjectPrice({ cost, cost_currency, shipping_rate, customs_duty_rate }, RATES) || {};
+    const target_margin_pct = pick(projRng, [20, 25, 25, 30, 35]);
+    const priced = calcProjectPrice({ cost, cost_currency, shipping_rate, customs_duty_rate, target_margin_pct }, RATES) || {};
     const when = daysAgo(3 + Math.floor(projRng() * 90));
     const who = pick(projRng, TEAM);
     return {
@@ -201,6 +202,7 @@ function seed() {
       cost_currency,
       shipping_rate,
       customs_duty_rate,
+      target_margin_pct,
       msrp_aed_inc_vat: priced.msrp_aed_inc_vat ?? null,
       msrp_aed_ex_vat: priced.msrp_aed_ex_vat ?? null,
       msrp_sar: priced.msrp_sar ?? null,

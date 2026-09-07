@@ -166,27 +166,29 @@ export const DEFAULT_COST_MARGIN_PCT = 25;
  * Compute all 6 MSRP fields from EXW cost by enforcing a target gross margin.
  * Pure EXW basis — no shipping, no customs (unlike calcProjectPrice).
  *
- * cost_aed = exw_cost × FX rate
- * raw      = cost_aed / (1 - margin%)   → ×1.05 VAT → ceil/5 → removeMOD → ÷1.05
- * KSA/QAT derived from the prettified AED via the standard formulas.
- * No additional-markup pass — real_msrp_* === msrp_*.
+ * cost_aed     = exw_cost × FX rate
+ * real_msrp    = cost_aed / (1 - margin%)  → ×1.05 VAT → ceil/5 → removeMOD → ÷1.05
+ * msrp_*       = real_msrp after optional additional-markup second pass (same as calcMSRPs)
+ * KSA/QAT derived from the final AED via the standard formulas.
  */
-export function calcCostBasedMSRPs(exwCost, costCurrency, targetMarginPct, rates) {
+export function calcCostBasedMSRPs(exwCost, costCurrency, targetMarginPct, rates, additionalMarkupPct = null) {
   if (!exwCost || !costCurrency || !rates?.[costCurrency]) return null;
   const margin = (targetMarginPct ?? DEFAULT_COST_MARGIN_PCT) / 100;
   if (!(margin > 0 && margin < 1)) return null;
-  const pf2     = v => v != null ? parseFloat(v.toFixed(2)) : null;
-  const costAED = exwCost * rates[costCurrency];
-  const raw     = costAED / (1 - margin);
-  const vatted  = raw * 1.05;
-  const ceiled  = Math.ceil(vatted / 5) * 5;
-  const msrp_aed = pf2(removeMOD(ceiled) / 1.05);
+  const pf2           = v => v != null ? parseFloat(v.toFixed(2)) : null;
+  const costAED       = exwCost * rates[costCurrency];
+  const raw           = costAED / (1 - margin);
+  const vatted        = raw * 1.05;
+  const ceiled        = Math.ceil(vatted / 5) * 5;
+  const real_msrp_aed = pf2(removeMOD(ceiled) / 1.05);
+  const real_msrp_sar = pf2(suggestKSAPrice(real_msrp_aed));
+  const real_msrp_qat = pf2(suggestQATPrice(real_msrp_aed));
+  const msrp_aed = additionalMarkupPct
+    ? pf2(applyAdditionalMarkupUAE(real_msrp_aed, additionalMarkupPct))
+    : real_msrp_aed;
   const msrp_sar = pf2(suggestKSAPrice(msrp_aed));
   const msrp_qat = pf2(suggestQATPrice(msrp_aed));
-  return {
-    real_msrp_aed: msrp_aed, real_msrp_sar: msrp_sar, real_msrp_qat: msrp_qat,
-    msrp_aed, msrp_sar, msrp_qat,
-  };
+  return { real_msrp_aed, real_msrp_sar, real_msrp_qat, msrp_aed, msrp_sar, msrp_qat };
 }
 
 // ── EMPLOYEE PRICE ────────────────────────────────────────────
@@ -214,21 +216,27 @@ export const MARGIN_COLORS = {
 };
 
 // ── PROJECT ITEM PRICING ──────────────────────────────────────
+export const DEFAULT_PROJECT_MARGIN_PCT = 25;
+
 /**
  * Cost-driven pricing for project items.
  * landed = cost × rate × (1 + ship%) × (1 + duty%)
- * Targets a fixed 25% gross margin, adds 5% UAE VAT, then prettifies.
+ * Targets target_margin_pct (default 25%) on landed cost, adds 5% UAE VAT,
+ * then prettifies. Unlike calcCostBasedMSRPs this prices off the LANDED cost,
+ * so shipping and customs are included in the margin base.
  * Returns { msrp_aed_inc_vat, msrp_aed_ex_vat, landed_cost_aed } or null.
  */
-export function calcProjectPrice({ cost, cost_currency, shipping_rate, customs_duty_rate }, rates) {
+export function calcProjectPrice({ cost, cost_currency, shipping_rate, customs_duty_rate, target_margin_pct }, rates) {
   if (!cost || !cost_currency || !rates?.[cost_currency]) return null;
+  const margin            = (target_margin_pct ?? DEFAULT_PROJECT_MARGIN_PCT) / 100;
+  if (!(margin > 0 && margin < 1)) return null;
   const rate              = rates[cost_currency];
   const ship              = (shipping_rate  ?? 0)   / 100;
   const duty              = (customs_duty_rate ?? 5.5) / 100;
   const costExCustomsSrc  = cost * (1 + ship);
   const landedSrc         = costExCustomsSrc * (1 + duty);
   const landedAED         = landedSrc * rate;
-  const raw               = landedAED / (1 - 0.25);   // 25% gross margin target
+  const raw               = landedAED / (1 - margin);   // gross margin target on landed cost
   const vatted            = raw * 1.05;
   const ceiled            = Math.ceil(vatted / 5) * 5;
   const incVat            = removeMOD(ceiled);
@@ -239,6 +247,7 @@ export function calcProjectPrice({ cost, cost_currency, shipping_rate, customs_d
     msrp_sar:              suggestKSAPrice(exVat) != null ? parseFloat(suggestKSAPrice(exVat).toFixed(2)) : null,
     msrp_qat:              suggestQATPrice(exVat) != null ? parseFloat(suggestQATPrice(exVat).toFixed(2)) : null,
     landed_cost_aed:       parseFloat(landedAED.toFixed(2)),
+    target_margin_pct:     parseFloat((margin * 100).toFixed(2)),
     cost_ex_customs_src:   parseFloat(costExCustomsSrc.toFixed(2)),
     landed_cost_src:       parseFloat(landedSrc.toFixed(2)),
   };

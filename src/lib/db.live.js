@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { orExpression } from './search';
 
 // ── INTERNAL HELPERS ──────────────────────────────────────────
 
@@ -8,8 +9,9 @@ const toNum = (v) => {
   return isNaN(n) ? null : n;
 };
 
-const CHUNK = 500;   // max rows per upsert / .in() batch
-const PAGE  = 1000;  // rows per paginated fetch
+const CHUNK = 500;    // max rows per upsert / .in() batch
+const PAGE  = 10000;  // rows requested per paginated fetch (server may cap lower)
+
 
 function chunkArray(arr, size) {
   const out = [];
@@ -19,15 +21,18 @@ function chunkArray(arr, size) {
 
 // Walks a Supabase query builder through all pages and concatenates results.
 // buildQuery receives (from, to) and must return the full query.
+// Advances by rows actually returned rather than by PAGE, so a server-side
+// max_rows cap below PAGE silently reduces the stride instead of truncating
+// the result. Costs one extra empty request at the end.
 async function fetchAllPages(buildQuery) {
   let all  = [];
   let from = 0;
   while (true) {
     const { data, error } = await buildQuery(from, from + PAGE - 1);
     if (error) throw error;
+    if (!data?.length) break;
     all = all.concat(data);
-    if (data.length < PAGE) break;
-    from += PAGE;
+    from += data.length;
   }
   return all;
 }
@@ -108,10 +113,9 @@ export async function fetchBrandRule(brandCode) {
 // ── PRICING MASTER ────────────────────────────────────────────
 export async function searchItems(query) {
   if (!query?.trim()) return [];
-  const q = query.trim();
   const { data, error } = await supabase.from('pricing_master')
     .select('*, brands(brand_name)')
-    .or(`item_code.ilike.%${q.toUpperCase()}%,item_name.ilike.%${q}%`)
+    .or(orExpression(query))
     .order('item_code').limit(20);
   if (error) throw error;
   return data;
@@ -157,6 +161,23 @@ export async function bulkSaveItems(items) {
   }
 }
 
+// Writes only the columns present in each update object, leaving every other
+// column untouched. bulkSaveItems can't be used for partial updates — it upserts
+// the full stripItem shape, so any column absent from the payload gets nulled.
+export async function bulkUpdateItemFields(updates) {
+  const { data: { user } } = await supabase.auth.getUser();
+  const at = new Date().toISOString();
+  const by = user?.email || null;
+  for (const batch of chunkArray(updates, 25)) {
+    await Promise.all(batch.map(async ({ item_code, ...fields }) => {
+      if (!Object.keys(fields).length) return;
+      const { error } = await supabase.from('pricing_master')
+        .update({ ...fields, updated_at: at, updated_by: by })
+        .eq('item_code', item_code.toUpperCase());
+      if (error) throw error;
+    }));
+  }
+}
 // ── PRICE HISTORY ─────────────────────────────────────────────
 export async function fetchHistory(itemCode, limit = 10) {
   const { data, error } = await supabase.from('price_history')
@@ -186,7 +207,7 @@ export async function fetchItemsByCodes(itemCodes) {
   const results = [];
   for (const batch of chunkArray(codes, CHUNK)) {
     const { data, error } = await supabase.from('pricing_master')
-      .select('item_code, exw_cost, cost_currency, shipping_rate, customs_duty_rate, msrp_primary_ex_vat, msrp_primary_inc_vat, msrp_primary_currency, msrp_secondary_ex_vat, msrp_secondary_inc_vat, msrp_secondary_currency, price_used, msrp_aed, msrp_sar, msrp_qat')
+      .select('item_code, brand_code, item_name, barcode, exw_cost, cost_currency, shipping_rate, customs_duty_rate, msrp_primary_ex_vat, msrp_primary_inc_vat, msrp_primary_currency, msrp_secondary_ex_vat, msrp_secondary_inc_vat, msrp_secondary_currency, price_used, target_margin_pct, cost_source, price_source, msrp_aed, msrp_sar, msrp_qat, real_msrp_aed, real_msrp_sar, real_msrp_qat, uae_overridden, ksa_overridden, qat_overridden')
       .in('item_code', batch);
     if (error) throw error;
     results.push(...data);
@@ -195,17 +216,24 @@ export async function fetchItemsByCodes(itemCodes) {
 }
 
 // ── ITEM LIST ─────────────────────────────────────────────────
-export async function fetchItemList({ brandCode, search, page = 0, pageSize = 100 } = {}) {
+export async function fetchItemList({
+  brandCode, search, page = 0, pageSize = 100,
+  sortCol = 'item_code', sortDir = 'asc',
+} = {}) {
   let query = supabase
     .from('pricing_master')
-    .select('item_code, item_name, barcode, brand_code, cost_currency, exw_cost, shipping_rate, customs_duty_rate, msrp_primary_ex_vat, msrp_primary_inc_vat, msrp_primary_currency, msrp_secondary_ex_vat, msrp_secondary_inc_vat, msrp_secondary_currency, price_used, msrp_aed, msrp_sar, msrp_qat, price_source, cost_source, target_margin_pct, updated_at, updated_by', { count: 'exact' })
-    .order('item_code')
+    .select('item_code, item_name, barcode, brand_code, cost_currency, exw_cost, shipping_rate, customs_duty_rate, msrp_primary_ex_vat, msrp_primary_inc_vat, msrp_primary_currency, msrp_secondary_ex_vat, msrp_secondary_inc_vat, msrp_secondary_currency, price_used, msrp_aed, msrp_sar, msrp_qat, price_source, cost_source, target_margin_pct, created_at, updated_at, updated_by', { count: 'exact' })
+    .order(sortCol, { ascending: sortDir === 'asc', nullsFirst: false })
     .range(page * pageSize, (page + 1) * pageSize - 1);
+
+  // Tiebreaker keeps paging stable when the sort column has duplicate values —
+  // without it a row can appear on two pages or none.
+  if (sortCol !== 'item_code') query = query.order('item_code', { ascending: true });
 
   if (brandCode) query = query.eq('brand_code', brandCode);
   if (search?.trim()) {
-    const q = search.trim();
-    query = query.or(`item_code.ilike.%${q.toUpperCase()}%,item_name.ilike.%${q}%`);
+    query = query.or(orExpression(search));
+
   }
 
   const { data, error, count } = await query;
@@ -275,6 +303,147 @@ export async function insertBrand(brandCode, brandName, markupPercentage = 10) {
   if (e2) throw e2;
 }
 
+// ── MASS OVERRIDE SELECTION ───────────────────────────────────
+// Same brand/search semantics as fetchItemList, but walks every page instead of
+// one — an override has to see the whole matched set, not the visible slice.
+export async function fetchItemsForOverride({ brandCode, search } = {}) {
+  return fetchAllPages((from, to) => {
+    let q = supabase
+      .from('pricing_master')
+      .select('item_code, item_name, brand_code, msrp_aed, msrp_sar, msrp_qat, uae_overridden, ksa_overridden, qat_overridden')
+      .order('item_code')
+      .range(from, to);
+    if (brandCode) q = q.eq('brand_code', brandCode);
+    if (search?.trim()) {
+      q = q.or(orExpression(search));
+
+    }
+    return q;
+  });
+}
+// ── COST CORRECTION ───────────────────────────────────────────
+// Targeted UPDATEs rather than an upsert: an upsert would INSERT a near-empty
+// row if an item_code no longer existed, so a stale correction list could
+// create junk records instead of failing loudly.
+export async function bulkUpdateExwCost(updates) {
+  const { data: { user } } = await supabase.auth.getUser();
+  const at = new Date().toISOString();
+  const by = user?.email || null;
+  for (const batch of chunkArray(updates, 25)) {
+    await Promise.all(batch.map(async ({ item_code, exw_cost }) => {
+      const { error } = await supabase.from('pricing_master')
+        .update({ exw_cost, updated_at: at, updated_by: by })
+        .eq('item_code', item_code.toUpperCase());
+      if (error) throw error;
+    }));
+  }
+}
+
+// ── ERP ITEM CACHE ────────────────────────────────────────────
+
+// item_code is stored upper-cased so it can be matched against pricing_master
+// (also upper-cased) with a plain .in() lookup — no case-folding needed.
+export async function syncErpItemsBatch(items, syncedAt) {
+  const dedup = new Map();
+  for (const r of items) {
+    const code = r.item_code?.toUpperCase();
+    if (!code) continue;
+    dedup.set(code, {
+      item_code: code,
+      item_name: r.item_name ?? null,
+      brand:     r.brand     ?? null,
+      modified:  r.modified  ?? null,
+      synced_at: syncedAt,
+    });
+  }
+  if (!dedup.size) return;
+  const { error } = await supabase.from('erp_items')
+    .upsert([...dedup.values()], { onConflict: 'item_code' });
+  if (error) throw error;
+}
+
+// Returns the subset of `codes` present in the ERP cache. Chunked .in() lookups
+// hit the primary key index, so this stays cheap as long as `codes` is the
+// already-narrowed candidate set rather than the whole catalogue.
+export async function filterCodesInErpCache(codes) {
+  const found = new Set();
+  for (const batch of chunkArray(codes, CHUNK)) {
+    const { data, error } = await supabase
+      .from('erp_items').select('item_code').in('item_code', batch);
+    if (error) throw error;
+    data.forEach(r => found.add(r.item_code));
+  }
+  return found;
+}
+
+// Only safe after a FULL sync — an incremental sync doesn't touch unchanged
+// rows, so their synced_at stays old and they'd be wrongly deleted.
+export async function pruneStaleErpItems(syncedAtBefore) {
+  const { error } = await supabase.from('erp_items').delete().lt('synced_at', syncedAtBefore);
+  if (error) throw error;
+}
+
+export async function fetchErpItemCodes() {
+  return fetchAllPages((from, to) =>
+    supabase.from('erp_items').select('item_code').range(from, to)
+  );
+}
+
+export async function countErpItems() {
+  const { count, error } = await supabase
+    .from('erp_items').select('item_code', { count: 'exact', head: true });
+  if (error) throw error;
+  return count ?? 0;
+}
+
+// Single-row metadata table — avoids a COUNT(*) + sort over erp_items just to
+// render "N items, last synced X".
+export async function getErpCacheInfo() {
+  const { data, error } = await supabase
+    .from('erp_sync_meta')
+    .select('last_synced_at, modified_cursor, item_count')
+    .eq('id', 1)
+    .maybeSingle();
+  if (error) throw error;
+  return {
+    count:    data?.item_count      ?? 0,
+    syncedAt: data?.last_synced_at  ?? null,
+    cursor:   data?.modified_cursor ?? null,
+  };
+}
+
+export async function updateErpSyncMeta({ syncedAt, cursor, count }) {
+  const { error } = await supabase.from('erp_sync_meta').upsert({
+    id: 1,
+    last_synced_at:  syncedAt,
+    modified_cursor: cursor,
+    item_count:      count,
+  }, { onConflict: 'id' });
+  if (error) throw error;
+}
+
+// Mid-sync checkpoint. Items arrive ordered by `modified` ascending, so
+// everything at or below the saved cursor is already persisted — an interrupted
+// sync resumes from here instead of restarting.
+export async function saveErpSyncCursor(cursor, syncedAt) {
+  const { error } = await supabase.from('erp_sync_meta')
+    .upsert({ id: 1, modified_cursor: cursor, last_synced_at: syncedAt }, { onConflict: 'id' });
+  if (error) throw error;
+}
+
+// Fallback when the metadata row is missing or was never written: the newest
+// `modified` already cached tells us where to resume.
+export async function getErpMaxModified() {
+  const { data, error } = await supabase
+    .from('erp_items')
+    .select('modified')
+    .not('modified', 'is', null)
+    .order('modified', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  return data?.[0]?.modified ?? null;
+}
+
 // ── ERP EXPORT ───────────────────────────────────────────────
 // Paginates through all rows — safe at 300k SKUs.
 export async function fetchAllPricesForExport() {
@@ -285,6 +454,20 @@ export async function fetchAllPricesForExport() {
       .order('item_code')
       .range(from, to)
   );
+}
+
+// brandCodes is optional — pass a non-empty array to pull only those brands.
+export async function fetchAllItemsForErpAutomation(brandCodes) {
+  const filtered = Array.isArray(brandCodes) && brandCodes.length > 0;
+  return fetchAllPages((from, to) => {
+    let q = supabase.from('pricing_master')
+      .select('item_code, item_name, brand_code, barcode, msrp_aed, msrp_sar, msrp_qat')
+      .not('item_code', 'is', null)
+      .order('item_code')
+      .range(from, to);
+    if (filtered) q = q.in('brand_code', brandCodes);
+    return q;
+  });
 }
 
 // ── BRAND ITEMS ───────────────────────────────────────────────
@@ -398,6 +581,7 @@ export async function saveProjectItem(item, { isNew = false } = {}) {
     cost_currency:     item.cost_currency,
     shipping_rate:     toNum(item.shipping_rate) ?? 0,
     customs_duty_rate: toNum(item.customs_duty_rate) ?? 5.5,
+    target_margin_pct: toNum(item.target_margin_pct) ?? 25,
     msrp_aed_inc_vat:  toNum(item.msrp_aed_inc_vat),
     msrp_aed_ex_vat:   toNum(item.msrp_aed_ex_vat),
     msrp_sar:          toNum(item.msrp_sar),
@@ -426,6 +610,21 @@ export async function saveProjectItem(item, { isNew = false } = {}) {
       .from('project_items')
       .update(row)
       .eq('item_code', code);
+    if (error) throw error;
+  }
+}
+
+// Applies pre-computed field updates to many project items.
+// Each entry must carry item_code plus only the columns being changed.
+export async function bulkUpdateProjectItems(updates) {
+  if (!updates?.length) return;
+  const { data: { user } } = await supabase.auth.getUser();
+  const stamp = { updated_at: new Date().toISOString(), updated_by: user?.email || null };
+  for (const { item_code, ...fields } of updates) {
+    const { error } = await supabase
+      .from('project_items')
+      .update({ ...fields, ...stamp })
+      .eq('item_code', item_code.toUpperCase());
     if (error) throw error;
   }
 }

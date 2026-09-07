@@ -4,6 +4,7 @@ import { applyAdditionalMarkupUAE, suggestKSAPrice, suggestQATPrice, compoundMar
 import { t, inp, btnW, btnG, lbl, groupBox } from '../pricing/styles';
 import { useAuth } from '../../lib/AuthContext';
 import { downloadCSV } from '../../lib/csvExport';
+import { downloadXLSX } from '../../lib/xlsxExport';
 
 
 // Apply additional markup to the stored real_msrp_aed (prettified base), re-prettify, derive SAR/QAT.
@@ -407,7 +408,7 @@ export default function GlobalMarkupExport({ setExportActions }) {
       }
 
       addLog(`Done — ${rows.length} rows.`);
-      downloadCSV(rows, `global_markup_${now}.csv`);
+      downloadXLSX(rows, `global_markup_${now}.xlsx`);
     } catch (e) {
       addLog(`Error: ${e.message}`);
     } finally {

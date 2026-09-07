@@ -3,12 +3,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useParams } from 'react-router-dom';
 import { t } from './pricing/styles';
 import { IconDownload } from '../components/icons';
-import ERPPriceExport from './others/ERPPriceExport';
+import ERPAutomation from './others/ERPAutomation';
+import CostLookup from './others/CostLookup';
 import GlobalMarkupExport from './others/GlobalMarkupExport';
 
 const MODULES = {
-  'erp-export':    { label: 'ERP Price Export', description: 'Generate ERP-ready price files from the pricing master.' },
-  'global-markup': { label: 'Global Markup',    description: 'Apply and export portfolio-wide markup adjustments.' },
+  'erp-export':    { label: 'ERP Automation', description: 'Price export, item coverage check, and combined price match report.' },
+  'cost-lookup':   { label: 'Cost Lookup',    description: 'Paste a list of item codes and get their EXW costs back.' },
+  'global-markup': { label: 'Global Markup',  description: 'Apply and export portfolio-wide markup adjustments.' },
 };
 
 export default function OthersMaster() {
@@ -55,7 +57,12 @@ export default function OthersMaster() {
         <AnimatePresence mode="wait">
           {tab === 'erp-export' && (
             <motion.div key="erp" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
-              <ERPPriceExport />
+              <ERPAutomation />
+            </motion.div>
+          )}
+          {tab === 'cost-lookup' && (
+            <motion.div key="cl" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
+              <CostLookup />
             </motion.div>
           )}
           {tab === 'global-markup' && (

@@ -503,7 +503,10 @@ export default function Brands({ rates = {}, onToast, refreshKey }) {
         <div style={{ ...groupBox(false), marginBottom:16 }}>
           <div style={{ ...groupHead, marginBottom:16 }}>New brand</div>
           {addErr && <div style={{ background:'rgba(242,100,100,0.08)', border:'1px solid rgba(242,100,100,0.2)', borderRadius:8, padding:'10px 14px', color:t.red, fontSize:13, marginBottom:14 }}>{addErr}</div>}
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 2fr 1fr auto', gap:12, alignItems:'end' }}>
+          {/* align to start, not end — only the first field carries a hint line
+              below its input, and bottom-aligning made every other control sit
+              level with that hint instead of with the input itself */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 2fr 1fr auto', gap:12, alignItems:'start' }}>
             <div style={fg}>
               <label style={lbl}>Brand code</label>
               <input style={inp(!!newBrand.brand_code, false)} placeholder="e.g. KLIM"
@@ -526,10 +529,14 @@ export default function Brands({ rates = {}, onToast, refreshKey }) {
                 onChange={e => setNewBrand(b => ({ ...b, markup_percentage: e.target.value }))}
                 onKeyDown={e => e.key === 'Enter' && handleAddBrand()}/>
             </div>
-            <button style={{ ...btnW, height:42, alignSelf:'end', opacity:saving?0.6:1 }}
-              onClick={handleAddBrand} disabled={saving}>
-              {saving ? 'Saving...' : 'Add brand'}
-            </button>
+            <div style={fg}>
+              {/* spacer matching the label row so the button lines up with the inputs */}
+              <label style={{ ...lbl, visibility:'hidden' }} aria-hidden="true">.</label>
+              <button style={{ ...btnW, height:42, opacity:saving?0.6:1 }}
+                onClick={handleAddBrand} disabled={saving}>
+                {saving ? 'Saving...' : 'Add brand'}
+              </button>
+            </div>
           </div>
         </div>
       )}

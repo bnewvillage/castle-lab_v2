@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { BrowserRouter, HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import './styles/global.css';
 
 import { DEMO } from './demo/demoConfig';
@@ -25,12 +25,15 @@ function ScrollToTop() {
   return null;
 }
 
+// Enter-only transition. Deliberately no exit animation: routes that redirect
+// (Login once signed in, and the section redirects below) swap themselves for
+// <Navigate> mid-transition, which would strand an AnimatePresence mode="wait"
+// waiting on an exit that never completes — leaving the page blank.
 function PageTransition({ children }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
       transition={{ duration: 0.25, ease: 'easeOut' }}
     >
       {children}
@@ -51,25 +54,20 @@ function Shell({ children }) {
 
 function AppRoutes() {
   const location = useLocation();
-  // Key routes by section (not full path) so module switches inside an app
-  // (e.g. pricing tabs) re-render in place instead of remounting the page.
-  const sectionKey = location.pathname.split('/').slice(0, 3).join('/') || '/';
 
   return (
     <>
       <ScrollToTop />
       {location.pathname === '/' && <Navbar />}
-      <AnimatePresence mode="wait">
-        <Routes location={location} key={sectionKey}>
-          <Route path="/" element={<PageTransition><Home /></PageTransition>} />
-          <Route path="/login" element={<PageTransition><Login /></PageTransition>} />
-          <Route path="/apps" element={<Shell><Apps /></Shell>} />
-          <Route path="/apps/pricing-master" element={<Navigate to="/apps/pricing-master/single" replace />} />
-          <Route path="/apps/pricing-master/:tab" element={<Shell><PricingMaster /></Shell>} />
-          <Route path="/apps/others" element={<Navigate to="/apps/others/erp-export" replace />} />
-          <Route path="/apps/others/:tab" element={<Shell><OthersMaster /></Shell>} />
-        </Routes>
-      </AnimatePresence>
+      <Routes>
+        <Route path="/" element={<PageTransition><Home /></PageTransition>} />
+        <Route path="/login" element={<PageTransition><Login /></PageTransition>} />
+        <Route path="/apps" element={<Shell><Apps /></Shell>} />
+        <Route path="/apps/pricing-master" element={<Navigate to="/apps/pricing-master/single" replace />} />
+        <Route path="/apps/pricing-master/:tab" element={<Shell><PricingMaster /></Shell>} />
+        <Route path="/apps/others" element={<Navigate to="/apps/others/erp-export" replace />} />
+        <Route path="/apps/others/:tab" element={<Shell><OthersMaster /></Shell>} />
+      </Routes>
     </>
   );
 }

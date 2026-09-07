@@ -7,6 +7,7 @@
 // ─────────────────────────────────────────────────────────────
 import { store } from './demoData';
 import { DEMO_USER } from './demoConfig';
+import { matchesSearch } from '../lib/search';
 
 // Small artificial latency so loading states actually render.
 const wait = (ms = 130) => new Promise(r => setTimeout(r, ms));
@@ -145,9 +146,8 @@ export async function fetchBrandsWithStats() {
 export async function searchItems(query) {
   await wait(90);
   if (!query?.trim()) return [];
-  const q = query.trim().toLowerCase();
   return store.pricingMaster
-    .filter(i => i.item_code.toLowerCase().includes(q) || (i.item_name || '').toLowerCase().includes(q))
+    .filter(i => matchesSearch(i, query))
     .slice(0, 20)
     .map(withBrand);
 }
@@ -179,6 +179,21 @@ export async function bulkSaveItems(items) {
   for (const row of dedup.values()) upsertItem(row);
 }
 
+export async function fetchItemsForOverride({ brandCode, search } = {}) {
+  await wait(150);
+  let rows = [...store.pricingMaster];
+  if (brandCode) rows = rows.filter(i => i.brand_code === brandCode);
+  if (search?.trim()) rows = rows.filter(i => matchesSearch(i, search));
+
+  return rows.sort((a, b) => a.item_code.localeCompare(b.item_code)).map(clone);
+}
+export async function bulkUpdateItemFields(updates) {
+  await wait(180);
+  for (const { item_code, ...fields } of updates) {
+    const row = store.pricingMaster.find(i => i.item_code === item_code.toUpperCase());
+    if (row) Object.assign(row, fields, { updated_at: new Date().toISOString() });
+  }
+}
 export async function checkExisting(itemCodes) {
   await wait(90);
   const codes = new Set(itemCodes.map(c => c.toUpperCase()));
@@ -192,15 +207,27 @@ export async function fetchItemsByCodes(itemCodes) {
   return Object.fromEntries(rows.map(r => [r.item_code, clone(r)]));
 }
 
-export async function fetchItemList({ brandCode, search, page = 0, pageSize = 100 } = {}) {
+export async function fetchItemList({
+  brandCode, search, page = 0, pageSize = 100,
+  sortCol = 'item_code', sortDir = 'asc',
+} = {}) {
   await wait(140);
   let rows = [...store.pricingMaster];
   if (brandCode) rows = rows.filter(i => i.brand_code === brandCode);
-  if (search?.trim()) {
-    const q = search.trim().toLowerCase();
-    rows = rows.filter(i => i.item_code.toLowerCase().includes(q) || (i.item_name || '').toLowerCase().includes(q));
-  }
-  rows.sort((a, b) => a.item_code.localeCompare(b.item_code));
+  if (search?.trim()) rows = rows.filter(i => matchesSearch(i, search));
+
+  const dir = sortDir === 'asc' ? 1 : -1;
+  rows.sort((a, b) => {
+    const av = a[sortCol], bv = b[sortCol];
+    // Nulls last regardless of direction, matching nullsFirst:false in the live layer
+    if (av == null && bv == null) return a.item_code.localeCompare(b.item_code);
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    const cmp = typeof av === 'number' && typeof bv === 'number'
+      ? av - bv
+      : String(av).localeCompare(String(bv));
+    return cmp !== 0 ? dir * cmp : a.item_code.localeCompare(b.item_code);
+  });
   const count = rows.length;
   const paged = rows.slice(page * pageSize, (page + 1) * pageSize).map(clone);
   return { data: paged, count };
@@ -350,6 +377,7 @@ export async function saveProjectItem(item, { isNew = false } = {}) {
     cost_currency:     item.cost_currency,
     shipping_rate:     toNum(item.shipping_rate) ?? 0,
     customs_duty_rate: toNum(item.customs_duty_rate) ?? 5.5,
+    target_margin_pct: toNum(item.target_margin_pct) ?? 25,
     msrp_aed_inc_vat:  toNum(item.msrp_aed_inc_vat),
     msrp_aed_ex_vat:   toNum(item.msrp_aed_ex_vat),
     msrp_sar:          toNum(item.msrp_sar),
@@ -370,6 +398,18 @@ export async function saveProjectItem(item, { isNew = false } = {}) {
     store.projectItems.push({ ...row, created_by: DEMO_USER.email });
   } else if (idx >= 0) {
     store.projectItems[idx] = { ...store.projectItems[idx], ...row };
+  }
+}
+
+export async function bulkUpdateProjectItems(updates) {
+  await wait(160);
+  for (const { item_code, ...fields } of updates || []) {
+    const idx = store.projectItems.findIndex(p => p.item_code === item_code.toUpperCase());
+    if (idx < 0) continue;
+    store.projectItems[idx] = {
+      ...store.projectItems[idx], ...fields,
+      updated_at: new Date().toISOString(), updated_by: DEMO_USER.email,
+    };
   }
 }
 
