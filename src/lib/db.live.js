@@ -386,10 +386,36 @@ export async function pruneStaleErpItems(syncedAtBefore) {
   if (error) throw error;
 }
 
+// Ordering is not optional here: .range() is OFFSET/LIMIT, and without a
+// deterministic sort Postgres may return a row on two pages or on none, which
+// silently corrupts any set built from the result.
 export async function fetchErpItemCodes() {
   return fetchAllPages((from, to) =>
-    supabase.from('erp_items').select('item_code').range(from, to)
+    supabase.from('erp_items').select('item_code').order('item_code').range(from, to)
   );
+}
+
+/**
+ * Item coverage — which pricing-master items are absent from the ERP cache.
+ *
+ * One round trip. The previous approach downloaded both tables in full and did
+ * the set difference in the browser, which meant two paginated walks whose cost
+ * grew quadratically with catalogue size.
+ *
+ * brandCodes scopes the pricing-master side only; the ERP side is always
+ * checked in full, so scoping can never produce a false "missing" row.
+ */
+export async function fetchErpCoverage(brandCodes) {
+  const scoped = Array.isArray(brandCodes) && brandCodes.length > 0;
+  const { data, error } = await supabase.rpc('erp_coverage', {
+    p_brands: scoped ? brandCodes : null,
+  });
+  if (error) throw error;
+  return {
+    erpTotal: data?.erp_total ?? 0,
+    dbTotal:  data?.db_total  ?? 0,
+    notInErp: data?.not_in_erp ?? [],
+  };
 }
 
 export async function countErpItems() {
