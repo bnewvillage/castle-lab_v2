@@ -140,7 +140,7 @@ export default function PricingMaster() {
             <BulkUpload onToast={showToast}/>
           </div>}
           {visited.has('list') && <div style={{ display: tab==='list' ? 'block' : 'none' }}>
-            <ItemList rates={rates} brands={brands} onEditItem={handleEditItem} maximized={maximized} setExportActions={setExportActions} isActive={tab==='list'} refreshKey={refreshKey}/>
+            <ItemList rates={rates} brands={brands} onEditItem={handleEditItem} maximized={maximized} setExportActions={setExportActions} isActive={tab==='list'} refreshKey={refreshKey} onToast={showToast}/>
           </div>}
           {visited.has('brands') && <div style={{ display: tab==='brands' ? 'block' : 'none' }}>
             <Brands rates={rates} onToast={showToast} refreshKey={refreshKey}/>

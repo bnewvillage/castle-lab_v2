@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { fetchItemList, fetchHistory } from '../../lib/db';
+import { fetchItemList, fetchHistory, deleteItem } from '../../lib/db';
 import { calcAllMargins, calcEmployeePrice, formatMargin, MARGIN_COLORS, resolvePriceUsed } from '../../lib/pricing';
 import { money } from '../../lib/num';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, PRICE_USED_OPTIONS } from './styles';
@@ -39,7 +39,7 @@ const td = (highlight, extra={}) => ({
 });
 
 // ── CONTEXT MENU ─────────────────────────────────────────────
-function ContextMenu({ x, y, item, isExpanded, onEdit, onToggleSummary, onExportItem, onDismiss, isViewer }) {
+function ContextMenu({ x, y, item, isExpanded, onEdit, onToggleSummary, onExportItem, onDelete, onDismiss, isViewer }) {
   const ref = useRef();
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) onDismiss(); };
@@ -63,19 +63,24 @@ function ContextMenu({ x, y, item, isExpanded, onEdit, onToggleSummary, onExport
           ...(!isViewer ? [{ label:'Edit item', icon:'✎', action:onEdit }] : []),
           { label:isExpanded?'Collapse ↑':'View summary', icon:isExpanded?'⊟':'⊞', action:onToggleSummary },
           { label:'Export item', icon:'↓', action:onExportItem },
-        ].map(({ label, icon, action }) => (
+          // Destructive, so it sits below a divider and is styled apart from
+          // the rest rather than being one more identical row to misclick.
+          ...(!isViewer ? [{ label:'Delete item', icon:'✕', action:onDelete, danger:true }] : []),
+        ].map(({ label, icon, action, danger }) => (
           <button key={label} onClick={() => { action(); onDismiss(); }}
             style={{
               display:'flex', alignItems:'center', gap:12,
               width:'100%', padding:'10px 16px',
               background:'none', border:'none', cursor:'pointer',
-              fontSize:13, color:t.t2, fontFamily:'var(--font-sans)',
+              borderTop: danger ? `1px solid ${t.b1}` : 'none',
+              marginTop: danger ? 4 : 0,
+              fontSize:13, color: danger ? t.red : t.t2, fontFamily:'var(--font-sans)',
               textAlign:'left', transition:'background 0.1s',
             }}
-            onMouseEnter={e=>e.currentTarget.style.background=t.bg3}
+            onMouseEnter={e=>e.currentTarget.style.background = danger ? 'rgba(242,100,100,0.1)' : t.bg3}
             onMouseLeave={e=>e.currentTarget.style.background='none'}
           >
-            <span style={{ fontSize:15, color:t.t4, width:18 }}>{icon}</span>
+            <span style={{ fontSize:15, color: danger ? t.red : t.t4, width:18 }}>{icon}</span>
             {label}
           </button>
         ))}
@@ -271,7 +276,7 @@ const LIST_COLUMNS = [
 ];
 
 // ── ITEM LIST ─────────────────────────────────────────────────
-export default function ItemList({ rates, brands, onEditItem, maximized, setExportActions, isActive, refreshKey }) {
+export default function ItemList({ rates, brands, onEditItem, maximized, setExportActions, isActive, refreshKey, onToast }) {
   const { isViewer } = useAuth();
   const [brandFilter, setBrandFilter] = useState('');
   const [search,      setSearch]      = useState('');
@@ -283,6 +288,9 @@ export default function ItemList({ rates, brands, onEditItem, maximized, setExpo
   const [error,       setError]       = useState(null);
   const [loaded,      setLoaded]      = useState(false);
   const [contextMenu,    setContextMenu]    = useState(null);
+  // Deleting is irreversible, so the menu only arms a confirmation.
+  const [pendingDelete,  setPendingDelete]  = useState(null);
+  const [deleting,       setDeleting]       = useState(false);
   const [expanded,       setExpanded]       = useState(new Set());
   const [exportingAll,   setExportingAll]   = useState(false);
   const [sortCol,        setSortCol]        = useState('item_code');
@@ -313,6 +321,26 @@ export default function ItemList({ rates, brands, onEditItem, maximized, setExpo
       setTotal(count); setPage(pg); setLoaded(true);
     } catch(e) { setError(e.message); }
     finally { setLoading(false); }
+  };
+
+  // Removes the row locally as well as reloading: the reload restores the
+  // current page, but dropping it immediately keeps the table honest if the
+  // refetch is slow.
+  const handleConfirmDelete = async () => {
+    if (!pendingDelete || deleting) return;
+    setDeleting(true);
+    const code = pendingDelete.item_code;
+    try {
+      await deleteItem(code);
+      setRows(prev => prev.filter(r => r.item_code !== code));
+      setTotal(n => (typeof n === 'number' ? Math.max(0, n - 1) : n));
+      setPendingDelete(null);
+      onToast?.(`Deleted ${code}`);
+      await loadItems(0);
+    } catch (e) {
+      setPendingDelete(null);
+      onToast?.(e.message || `Could not delete ${code}`, false);
+    } finally { setDeleting(false); }
   };
 
   // Dates and numbers are most useful newest/highest first, so they open desc;
@@ -528,9 +556,46 @@ export default function ItemList({ rates, brands, onEditItem, maximized, setExpo
           onEdit={()=>onEditItem(contextMenu.item)}
           onToggleSummary={()=>toggleExpanded(contextMenu.item.item_code)}
           onExportItem={()=>{ downloadXLSX([flattenItem(contextMenu.item)], `${contextMenu.item.item_code}.xlsx`); setContextMenu(null); }}
+          onDelete={()=>setPendingDelete(contextMenu.item)}
           onDismiss={()=>setContextMenu(null)}
           isViewer={isViewer}
         />
+      )}
+
+      {/* Delete confirmation — names the item and states that history survives,
+          since "delete" reasonably reads as "delete everything about it". */}
+      {pendingDelete && (
+        <div
+          style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', zIndex:600,
+                   display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}
+          onClick={() => !deleting && setPendingDelete(null)}
+        >
+          <div
+            style={{ background:t.bg2, border:`1px solid ${t.b2}`, borderRadius:16,
+                     padding:'26px 30px', width:'100%', maxWidth:460 }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ fontSize:17, fontWeight:600, color:t.t1, marginBottom:8 }}>Delete this item?</div>
+            <div style={{ fontSize:13.5, color:t.t3, lineHeight:1.6, marginBottom:16 }}>
+              <span style={{ fontFamily:'var(--font-mono)', color:t.t1 }}>{pendingDelete.item_code}</span>
+              {pendingDelete.item_name ? ` — ${pendingDelete.item_name}` : ''} will be removed from the
+              pricing master. This cannot be undone.
+            </div>
+            <div style={{ fontSize:12.5, color:t.t4, background:t.bg1, border:`1px solid ${t.b1}`,
+                          borderRadius:8, padding:'10px 14px', marginBottom:20 }}>
+              Its price history is kept, so re-adding the same item code later reconnects to it.
+            </div>
+            <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
+              <button style={btnG} disabled={deleting} onClick={() => setPendingDelete(null)}>Cancel</button>
+              <button
+                style={{ ...btnW, background:t.red, color:'#fff', opacity: deleting ? 0.6 : 1,
+                         cursor: deleting ? 'default' : 'pointer' }}
+                disabled={deleting}
+                onClick={handleConfirmDelete}
+              >{deleting ? 'Deleting…' : 'Delete item'}</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
