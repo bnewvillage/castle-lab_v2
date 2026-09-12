@@ -665,3 +665,28 @@ export async function deleteProjectItem(itemCode) {
     .eq('item_code', itemCode.toUpperCase());
   if (error) throw error;
 }
+
+// ── BULK CODE OPERATIONS ──────────────────────────────────────
+// Deletes many items by code. Price history is deliberately left in place:
+// it is the audit trail, and re-adding the same code later reconnects to it.
+export async function bulkDeleteItems(itemCodes) {
+  const codes = [...new Set((itemCodes || []).map(c => String(c).trim().toUpperCase()).filter(Boolean))];
+  if (!codes.length) return 0;
+  for (const batch of chunkArray(codes, CHUNK)) {
+    const { error } = await supabase.from('pricing_master').delete().in('item_code', batch);
+    if (error) throw error;
+  }
+  return codes.length;
+}
+
+// Renames item codes. One transaction in Postgres, because the rename has to
+// carry brand_code and price_history with it — see the migration for why.
+export async function renameItemCodes(pairs) {
+  const clean = (pairs || [])
+    .map(p => ({ old: String(p.old ?? '').trim().toUpperCase(), new: String(p.new ?? '').trim().toUpperCase() }))
+    .filter(p => p.old && p.new && p.old !== p.new);
+  if (!clean.length) return { renamed: 0, historyRows: 0 };
+  const { data, error } = await supabase.rpc('rename_item_codes', { p_pairs: clean });
+  if (error) throw error;
+  return { renamed: data?.renamed ?? 0, historyRows: data?.history_rows ?? 0 };
+}

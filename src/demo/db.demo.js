@@ -460,3 +460,42 @@ export async function fetchErpCoverage(brandCodes) {
     notInErp,
   };
 }
+
+// ── BULK CODE OPERATIONS ──────────────────────────────────────
+export async function bulkDeleteItems(itemCodes) {
+  await wait(160);
+  const codes = new Set((itemCodes || []).map(c => String(c).trim().toUpperCase()).filter(Boolean));
+  const before = store.pricingMaster.length;
+  store.pricingMaster = store.pricingMaster.filter(i => !codes.has(i.item_code.toUpperCase()));
+  return before - store.pricingMaster.length;
+}
+
+export async function renameItemCodes(pairs) {
+  await wait(200);
+  const clean = (pairs || [])
+    .map(p => ({ old: String(p.old ?? '').trim().toUpperCase(), new: String(p.new ?? '').trim().toUpperCase() }))
+    .filter(p => p.old && p.new && p.old !== p.new);
+  const byOld = new Map(clean.map(p => [p.old, p.new]));
+  const renaming = new Set(byOld.keys());
+  const taken = clean.filter(p =>
+    store.pricingMaster.some(i => i.item_code.toUpperCase() === p.new && !renaming.has(i.item_code.toUpperCase())));
+  if (taken.length) throw new Error(`target item code already in use: ${taken.map(p => p.new).join(', ')}`);
+  const brands = new Set(store.brands.map(b => b.brand_code));
+
+  let renamed = 0, historyRows = 0;
+  for (const item of store.pricingMaster) {
+    const next = byOld.get(item.item_code.toUpperCase());
+    if (!next) continue;
+    const prefix = next.split('-')[0];
+    item.item_code  = next;
+    if (brands.has(prefix)) item.brand_code = prefix;
+    item.updated_at = new Date().toISOString();
+    item.updated_by = DEMO_USER.email;
+    renamed++;
+  }
+  for (const h of store.priceHistory) {
+    const next = byOld.get((h.item_code || '').toUpperCase());
+    if (next) { h.item_code = next; historyRows++; }
+  }
+  return { renamed, historyRows };
+}

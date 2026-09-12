@@ -21,6 +21,8 @@ export const searchItems               = (...a) => impl.searchItems(...a);
 export const fetchItem                 = (...a) => impl.fetchItem(...a);
 export const saveItem                  = (...a) => impl.saveItem(...a);
 export const deleteItem                = (...a) => impl.deleteItem(...a);
+export const bulkDeleteItems           = (...a) => impl.bulkDeleteItems(...a);
+export const renameItemCodes           = (...a) => impl.renameItemCodes(...a);
 export const bulkSaveItems             = (...a) => impl.bulkSaveItems(...a);
 export const fetchHistory              = (...a) => impl.fetchHistory(...a);
 export const checkExisting             = (...a) => impl.checkExisting(...a);
