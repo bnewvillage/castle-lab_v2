@@ -38,6 +38,7 @@ export const fetchAllItemsForErpAutomation  = (...a) => impl.fetchAllItemsForErp
 export const syncErpItemsBatch              = (...a) => impl.syncErpItemsBatch(...a);
 export const pruneStaleErpItems             = (...a) => impl.pruneStaleErpItems(...a);
 export const fetchErpItemCodes              = (...a) => impl.fetchErpItemCodes(...a);
+export const fetchErpCoverage               = (...a) => impl.fetchErpCoverage(...a);
 export const filterCodesInErpCache          = (...a) => impl.filterCodesInErpCache(...a);
 export const countErpItems                  = (...a) => impl.countErpItems(...a);
 export const getErpCacheInfo                = (...a) => impl.getErpCacheInfo(...a);

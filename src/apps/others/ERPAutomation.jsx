@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { t, inp, btnW, btnG, lbl, groupBox, groupHead } from '../pricing/styles';
 import {
   fetchAllItemsForErpAutomation, fetchBrands,
-  syncErpItemsBatch, pruneStaleErpItems, fetchErpItemCodes, filterCodesInErpCache,
+  syncErpItemsBatch, pruneStaleErpItems, fetchErpCoverage, filterCodesInErpCache,
   countErpItems, getErpCacheInfo, updateErpSyncMeta,
   saveErpSyncCursor, getErpMaxModified,
 } from '../../lib/db';
@@ -373,22 +373,25 @@ export default function ERPAutomation() {
   const [covResult, setCovResult] = useState(null);
   const [covLog,    setCovLog]    = useState([]);
   const [covErr,    setCovErr]    = useState('');
+  const [covBrands, setCovBrands] = useState([]);   // empty = all brands
 
+  // The anti-join runs in Postgres and returns only the missing rows. Brand
+  // scoping narrows the pricing-master side; the ERP cache is always checked in
+  // full, so a scoped run can never report an item as missing that is present.
   const handleCoverage = async () => {
     if (covState === 'loading') return;
     setCovState('loading'); setCovErr(''); setCovLog([]); setCovResult(null);
     const addLog = m => setCovLog(p => [...p, m]);
     try {
-      addLog('Loading ERP item cache...');
-      const erpRows = await fetchErpItemCodes();
-      addLog(`ERP cache: ${erpRows.length.toLocaleString()} items.`);
-      addLog('Loading DB items...');
-      const dbRows = await fetchAllItemsForErpAutomation();
-      addLog(`DB: ${dbRows.length.toLocaleString()} items.`);
-      const erpCodes = new Set(erpRows.map(r => r.item_code?.toUpperCase()).filter(Boolean));
-      const notInErp = dbRows.filter(r => !erpCodes.has(r.item_code?.toUpperCase()));
-      addLog(`${notInErp.length.toLocaleString()} DB items not in ERP.`);
-      setCovResult({ erpTotal: erpRows.length, dbTotal: dbRows.length, notInErp });
+      const scoped = covBrands.length > 0;
+      addLog(scoped ? `Comparing ${covBrands.length} brand(s) against the ERP cache...`
+                    : 'Comparing the pricing master against the ERP cache...');
+      const result = await fetchErpCoverage(scoped ? covBrands : undefined);
+      addLog(`ERP cache: ${result.erpTotal.toLocaleString()} items.`);
+      addLog(scoped ? `DB in scope: ${result.dbTotal.toLocaleString()} items.`
+                    : `DB: ${result.dbTotal.toLocaleString()} items.`);
+      addLog(`${result.notInErp.length.toLocaleString()} DB items not in ERP.`);
+      setCovResult({ ...result, scoped, brands: covBrands });
       setCovState('done');
     } catch (err) {
       setCovErr(err.message || 'Unknown error');
@@ -594,7 +597,10 @@ export default function ERPAutomation() {
               Compare the pricing master against the ERP item cache — find DB items missing from ERP.
             </div>
           </div>
-          <RunBtn label="Check Coverage" loading={covState === 'loading'} disabled={!hasCache} onClick={handleCoverage} />
+          <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0, marginLeft:16 }}>
+            <BrandMultiSelect brands={brandList} selected={covBrands} onChange={setCovBrands} />
+            <RunBtn label="Check Coverage" loading={covState === 'loading'} disabled={!hasCache} onClick={handleCoverage} />
+          </div>
         </div>
 
         <LogBox lines={covLog} />
@@ -604,21 +610,30 @@ export default function ERPAutomation() {
           <div style={{ marginTop: 12 }}>
             <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
               <StatPill label="ERP cached" value={covResult.erpTotal.toLocaleString()} />
-              <StatPill label="DB items"   value={covResult.dbTotal.toLocaleString()} />
+              <StatPill label={covResult.scoped ? 'DB in scope' : 'DB items'} value={covResult.dbTotal.toLocaleString()} />
               <StatPill
                 label="not in ERP"
                 value={covResult.notInErp.length.toLocaleString()}
                 color={covResult.notInErp.length > 0 ? t.amber : t.green}
               />
             </div>
+            {/* A scoped run answers a narrower question than the headline pills
+                suggest, so say which brands it covered. */}
+            {covResult.scoped && (
+              <div style={{ fontSize: 12, color: t.t4, marginBottom: 10 }}>
+                Scoped to {covResult.brands.join(', ')} — the full ERP cache was still checked.
+              </div>
+            )}
             {covResult.notInErp.length > 0 && (
               <button
-                onClick={() => downloadXLSX(covResult.notInErp, `db_not_in_erp_${today}.xlsx`, { headers: ['item_code', 'item_name', 'brand_code', 'barcode', 'msrp_aed', 'msrp_sar', 'msrp_qat'] })}
+                onClick={() => downloadXLSX(covResult.notInErp, `db_not_in_erp_${covResult.scoped ? covResult.brands.join('-') + '_' : ''}${today}.xlsx`, { headers: ['item_code', 'item_name', 'brand_code', 'barcode', 'msrp_aed', 'msrp_sar', 'msrp_qat'] })}
                 style={{ ...btnG, display: 'flex', alignItems: 'center', gap: 6 }}
               >↓ XLSX ({covResult.notInErp.length.toLocaleString()} items)</button>
             )}
             {covResult.notInErp.length === 0 && (
-              <div style={{ fontSize: 13, color: t.green }}>All DB items are present in the ERP.</div>
+              <div style={{ fontSize: 13, color: t.green }}>
+                {covResult.scoped ? 'All DB items in scope are present in the ERP.' : 'All DB items are present in the ERP.'}
+              </div>
             )}
           </div>
         )}

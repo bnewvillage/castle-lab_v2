@@ -418,3 +418,45 @@ export async function deleteProjectItem(itemCode) {
   await wait();
   store.projectItems = store.projectItems.filter(p => p.item_code !== itemCode.toUpperCase());
 }
+
+// ── ERP CACHE ─────────────────────────────────────────────────
+// Only the item-coverage path is modelled here. The sync and report calls
+// still need a live ERPNext behind the proxy, so they stay unimplemented and
+// the screen's mount effects swallow their absence.
+//
+// The synthetic cache is every demo item except a deterministic slice, so
+// coverage reports a realistic non-zero "not in ERP" figure.
+const erpMissingCodes = () =>
+  new Set(store.pricingMaster.filter((_, i) => i % 29 === 0).map(i => i.item_code));
+
+export async function getErpCacheInfo() {
+  await wait(60);
+  const missing = erpMissingCodes();
+  return {
+    count:    store.pricingMaster.length - missing.size,
+    syncedAt: new Date(Date.now() - 36e5).toISOString(),
+    cursor:   null,
+  };
+}
+
+export async function countErpItems() {
+  await wait(40);
+  return store.pricingMaster.length - erpMissingCodes().size;
+}
+
+export async function fetchErpCoverage(brandCodes) {
+  await wait(120);
+  const scoped = Array.isArray(brandCodes) && brandCodes.length > 0;
+  const missing = erpMissingCodes();
+  const inScope = store.pricingMaster.filter(i => !scoped || brandCodes.includes(i.brand_code));
+  const notInErp = inScope.filter(i => missing.has(i.item_code)).map(i => ({
+    item_code: i.item_code, item_name: i.item_name, brand_code: i.brand_code,
+    barcode: i.barcode ?? null,
+    msrp_aed: i.msrp_aed ?? null, msrp_sar: i.msrp_sar ?? null, msrp_qat: i.msrp_qat ?? null,
+  }));
+  return {
+    erpTotal: store.pricingMaster.length - missing.size,
+    dbTotal:  inScope.length,
+    notInErp,
+  };
+}
