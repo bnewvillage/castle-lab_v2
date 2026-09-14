@@ -60,10 +60,17 @@ function downloadCSV(content, filename) {
   URL.revokeObjectURL(url);
 }
 
+// Matching is case-insensitive: pricing_master stores item_code uppercased,
+// while an ERP report returns the ERP's own casing. Only the lookup key is
+// normalised — the emitted row keeps the ERP spelling, since it is uploaded
+// back into the ERP.
+const codeKey = (v) => String(v ?? '').trim().toUpperCase();
+
 function mergeReport(erpRows, dbByCode, dbByBarcode, dbField) {
   return erpRows.map(row => {
-    const byCode = dbByCode[row.item_code];
-    const byBarcode = !byCode ? dbByBarcode[row.item_code] : null;
+    const key = codeKey(row.item_code);
+    const byCode = dbByCode[key];
+    const byBarcode = !byCode ? dbByBarcode[key] : null;
     const match = byCode ?? byBarcode ?? null;
     const new_rate = match?.[dbField] ?? null;
     const match_type = byCode ? 'item_code' : byBarcode ? 'barcode' : '';
@@ -101,8 +108,8 @@ export default function ERPPriceExport() {
     try {
       addLog('Fetching DB prices...');
       const dbRows = await fetchAllPricesForExport();
-      const dbByCode    = Object.fromEntries(dbRows.map(r => [r.item_code, r]));
-      const dbByBarcode = Object.fromEntries(dbRows.filter(r => r.barcode).map(r => [r.barcode, r]));
+      const dbByCode    = Object.fromEntries(dbRows.map(r => [codeKey(r.item_code), r]));
+      const dbByBarcode = Object.fromEntries(dbRows.filter(r => r.barcode).map(r => [codeKey(r.barcode), r]));
 
       addLog('Fetching AED report...');
       const erpAed = await fetchOneReport(email.trim(), password.trim(), REPORTS[0].name);
