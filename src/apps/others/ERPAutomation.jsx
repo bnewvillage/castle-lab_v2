@@ -54,10 +54,18 @@ function detectItemKey(rows) {
   return ITEM_CODE_KEYS.find(k => rows.some(r => r?.[k])) ?? null;
 }
 
+// Matching is case-insensitive. pricing_master stores item_code uppercased
+// (see stripItem), while an ERP report returns whatever casing the ERP holds —
+// so BTMO-Flasher-HONDA-EU4/EU5 must still find BTMO-FLASHER-HONDA-EU4/EU5.
+// Only the lookup is normalised; the emitted row keeps the ERP's own spelling,
+// because the export is uploaded back into the ERP.
+const codeKey = (v) => String(v ?? '').trim().toUpperCase();
+
 function mergeByCode(erpRows, dbByCode, dbByBarcode, dbField) {
   return erpRows.map(row => {
-    const byCode    = dbByCode[row.item_code];
-    const byBarcode = !byCode ? dbByBarcode[row.item_code] : null;
+    const key       = codeKey(row.item_code);
+    const byCode    = dbByCode[key];
+    const byBarcode = !byCode ? dbByBarcode[key] : null;
     const match     = byCode ?? byBarcode ?? null;
     return {
       ...row,
@@ -338,17 +346,19 @@ export default function ERPAutomation() {
       addLog(scoped ? `Fetching DB prices for ${expBrands.length} brand(s)...` : 'Fetching DB prices...');
       const dbRows      = await fetchAllItemsForErpAutomation(scoped ? expBrands : undefined);
       addLog(`DB: ${dbRows.length.toLocaleString()} rows.`);
-      const dbByCode    = Object.fromEntries(dbRows.map(r => [r.item_code, r]));
-      const dbByBarcode = Object.fromEntries(dbRows.filter(r => r.barcode).map(r => [r.barcode, r]));
+      const dbByCode    = Object.fromEntries(dbRows.map(r => [codeKey(r.item_code), r]));
+      const dbByBarcode = Object.fromEntries(dbRows.filter(r => r.barcode).map(r => [codeKey(r.barcode), r]));
 
       // The ERP report API returns the whole price list, so brand narrowing is
       // applied here: keep a row if its code carries a selected brand prefix or
       // its matched DB row belongs to one.
       const prefixes = expBrands.map(b => `${b}-`);
-      const inScope  = (row) =>
-        !scoped ||
-        prefixes.some(p => (row.item_code || '').toUpperCase().startsWith(p)) ||
-        (dbByCode[row.item_code] && expBrands.includes(dbByCode[row.item_code].brand_code));
+      const inScope  = (row) => {
+        if (!scoped) return true;
+        const key = codeKey(row.item_code);
+        return prefixes.some(p => key.startsWith(p))
+            || (dbByCode[key] && expBrands.includes(dbByCode[key].brand_code));
+      };
 
       const merged = {};
       for (const rep of PRICE_REPORTS) {
