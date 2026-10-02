@@ -72,7 +72,10 @@ export async function fetchRates() {
   const { data, error } = await supabase.from('exchange_rates').select('currency, rate_to_aed');
   if (error) throw error;
   const rates = Object.fromEntries(data.map(r => [r.currency, parseFloat(r.rate_to_aed)]));
-  rates['AED'] = 1; // base currency — always 1:1, never stored in DB
+  // AED is the base currency. It has a row in exchange_rates only because the
+  // pricing_master currency foreign keys require one; it is pinned here so that
+  // row's stored value can never move the base.
+  rates['AED'] = 1;
   return rates;
 }
 
