@@ -8,10 +8,11 @@
 // EUR is now 4.3 — a stealth repricing disguised as a rounding change. So each
 // price takes one of two paths:
 //
-//   exact      Re-running the OLD rule on today's inputs reproduces the stored
-//              price to the fils, which proves rates and markups have not moved
-//              for this item. Its new price is then simply the new rule applied
-//              to the same target — exactly what a fresh save would give.
+//   exact      Re-running a pipeline that once priced this item — the old rule,
+//              or an earlier deploy of the new one — on today's inputs reproduces
+//              the stored prices to the fils, which proves rates and markups have
+//              not moved for this item. Its new prices are then exactly what a
+//              fresh save gives today.
 //
 //   re-round   Otherwise the inputs have drifted, so the stored price is the only
 //              trustworthy record. The original target is inferred from it and
@@ -30,10 +31,13 @@
 //   UAE        round up to 5; snap down to a round hundred when within 5
 //              (100–999), 10 (1,000–4,999) or 20 (5,000+); hundreds → …99.95
 //   KSA/Qatar  round up to 5; hundreds → …99.95; no snap
+// Under it, and under the new rule as first deployed (5 Oct 2026), a brand's
+// additional markup went on the already-rounded base and was rounded again.
+// Today it goes on the unrounded target and UAE rounds once.
 // ─────────────────────────────────────────────────────────────
 import {
-  prettifyShelf, suggestKSAPrice, suggestQATPrice, applyAdditionalMarkupUAE,
-  resolvePriceUsed, DEFAULT_COST_MARGIN_PCT, PRESTIGE_50_FROM, PRESTIGE_100_FROM,
+  prettifyShelf, suggestKSAPrice, suggestQATPrice, itemBaseShelf, msrpsFromBaseShelf,
+  PRESTIGE_50_FROM, PRESTIGE_100_FROM,
 } from './pricing';
 import { toNum } from './num';
 
@@ -68,21 +72,28 @@ const legacyQAT = (aed) => aed == null ? null : round2(legacyMarketShelf(aed * 1
 const freshKSA  = (aed) => aed == null ? null : round2(suggestKSAPrice(aed));
 const freshQAT  = (aed) => aed == null ? null : round2(suggestQATPrice(aed));
 
-// The UAE shelf target an item's source implies, multiplied in the same order
-// the pricing code uses so the float result is bit-identical.
-function uaeSource(item, { rates, rules }) {
-  const rule = rules?.[item.brand_code] ?? {};
-  const additional = rule.additional || null;
-  if (item.price_used === 'cost_based') {
-    const cost = toNum(item.exw_cost), rate = rates?.[item.cost_currency];
-    const margin = (toNum(item.target_margin_pct) ?? DEFAULT_COST_MARGIN_PCT) / 100;
-    if (cost == null || !rate || !(margin > 0 && margin < 1)) return null;
-    return { shelf: cost * rate / (1 - margin) * 1.05, additional };
-  }
-  const { value, currency } = resolvePriceUsed(item);
-  if (value == null || !currency || !rates?.[currency]) return null;
-  const markup = rule.markup ?? 10;
-  return { shelf: value * rates[currency] * (1 + markup / 100) * 1.05, additional };
+// The first deploy of the new rule had float tolerance only (no allowance for
+// 2dp storage noise), so its additional-markup pass could land a step low.
+const FIRST_DEPLOY_TOL = 1e-7;
+
+// Every (real_msrp_aed, msrp_aed) pair a pipeline has ever made from this base
+// target. If the stored pair is one of them, the target is trusted.
+function pipelinesFor(target, additional) {
+  const onBase = (real, shelf) => additional
+    ? round2(shelf(real * (1 + additional / 100) * 1.05) / 1.05)
+    : real;
+  const realOld = round2(legacyUaeShelf(target) / 1.05);
+  const realNew = round2(prettifyShelf(target) / 1.05);
+  const now     = msrpsFromBaseShelf(target, additional);
+  return {
+    now,
+    made: [
+      [realOld, onBase(realOld, legacyUaeShelf)],                              // old rule
+      [realNew, onBase(realNew, t => prettifyShelf(t, FIRST_DEPLOY_TOL))],     // new rule, first deploy
+      [realNew, onBase(realNew, prettifyShelf)],                               // new rule, second deploy
+      [now.real_msrp_aed, now.msrp_aed],                                       // today
+    ],
+  };
 }
 
 // ── Re-round a single stored price (the fallback path) ──
@@ -166,20 +177,19 @@ export function planRounding(items, { rates, rules, cutoff } = {}) {
       return true;
     };
 
-    // ── UAE: exact when the old pipeline reproduces what is stored ──
+    // ── UAE: exact when a pipeline that priced this item reproduces what is stored ──
     const aed = MARKETS.aed;
     let aedNow = toNum(item.msrp_aed), aedRealNow = toNum(item.real_msrp_aed);
-    const src = uaeSource(item, { rates, rules });
+    const rule   = rules?.[item.brand_code] ?? {};
+    const target = itemBaseShelf(item, { markup: rule.markup ?? 10, rates });
     let uaeExact = false;
-    if (src) {
-      const realOld = round2(legacyUaeShelf(src.shelf) / 1.05);
-      const msrpOld = src.additional ? round2(legacyUaeShelf(realOld * (1 + src.additional / 100) * 1.05) / 1.05) : realOld;
-      const realOk  = aedRealNow == null || same(aedRealNow, realOld);
-      const msrpOk  = item[aed.flag] || same(aedNow, msrpOld);
-      if (realOk && msrpOk) {
+    if (target != null) {
+      const { now, made } = pipelinesFor(target, rule.additional || null);
+      const fits = ([real, msrp]) => (aedRealNow == null || same(aedRealNow, real)) && (item[aed.flag] || same(aedNow, msrp));
+      if (made.some(fits)) {
         uaeExact = true;
-        const realNew = round2(prettifyShelf(src.shelf) / 1.05);
-        const msrpNew = src.additional ? round2(applyAdditionalMarkupUAE(realNew, src.additional)) : realNew;
+        const realNew = now.real_msrp_aed;
+        const msrpNew = now.msrp_aed;
         if (aedRealNow != null) { record('aed', aed.real, { value: realNew, status: 'exact' }); aedRealNow = realNew; }
         if (item[aed.flag]) bump('aed', 'overridden');
         else { bump('aed', record('aed', aed.field, { value: msrpNew, status: 'exact' }, true) ? 'exact' : 'same'); aedNow = msrpNew; }
@@ -196,11 +206,12 @@ export function planRounding(items, { rates, rules, cutoff } = {}) {
       if (record('aed', aed.real, rr)) aedRealNow = rr.value;
     }
 
-    // ── KSA and Qatar: derived from the UAE price, exact when that held ──
+    // ── KSA and Qatar: derived from the UAE price (by either rule), exact when that held ──
     for (const [key, legacy, fresh] of [['sar', legacyKSA, freshKSA], ['qat', legacyQAT, freshQAT]]) {
       const m = MARKETS[key];
+      const derived = (stored, from) => same(stored, legacy(from)) || same(stored, fresh(from));
       if (item[m.flag]) bump(key, 'overridden');
-      else if (same(item[m.field], legacy(toNum(item.msrp_aed)))) {
+      else if (derived(item[m.field], toNum(item.msrp_aed))) {
         bump(key, record(key, m.field, { value: fresh(aedNow), status: 'exact' }, true) ? 'exact' : 'same');
       } else {
         const r = reroundStored(item[m.field], key, { savedAfterCutoff: after });
@@ -208,7 +219,7 @@ export function planRounding(items, { rates, rules, cutoff } = {}) {
         record(key, m.field, r, true);
       }
       if (item[m.real] != null) {
-        if (same(item[m.real], legacy(toNum(item.real_msrp_aed)))) record(key, m.real, { value: fresh(aedRealNow), status: 'exact' });
+        if (derived(item[m.real], toNum(item.real_msrp_aed))) record(key, m.real, { value: fresh(aedRealNow), status: 'exact' });
         else record(key, m.real, reroundStored(item[m.real], key, { savedAfterCutoff: after }));
       }
     }

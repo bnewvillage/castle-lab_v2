@@ -108,7 +108,9 @@ export default function PriceRounding() {
           </div>
         ))}
         <div style={{ fontSize: 12, color: t.t4, marginTop: 10 }}>
-          Project items are not included — they are quotes. Each one picks up the rule the next time it is saved.
+          A brand's additional markup goes on the unrounded base, so UAE is rounded once; KSA and Qatar
+          derive from the rounded UAE price. Project items are not included — they are quotes. Each one
+          picks up the rule the next time it is saved.
         </div>
       </div>
 

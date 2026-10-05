@@ -124,14 +124,16 @@ export const PRESTIGE_100_FROM = 5000;
 // Anything less than a fils from a mark is treated as on it (the worst noise,
 // a 50% additional markup, is 0.008); a genuine target a fils off is not.
 export const ROUND_TOL = 0.009;
-const ceilTo  = (v, step) => (Math.ceil((v - ROUND_TOL) / step) * step) || 0;
-const floorTo = (v, step) => (Math.floor((v + ROUND_TOL) / step) * step) || 0;
+const ceilTo  = (v, step, tol) => (Math.ceil((v - tol) / step) * step) || 0;
+const floorTo = (v, step, tol) => (Math.floor((v + tol) / step) * step) || 0;
 
-export function prettifyShelf(target) {
-  if (target >= PRESTIGE_100_FROM) return floorTo(target, 100);
-  if (target >= PRESTIGE_50_FROM)  return floorTo(target, 50);
+// `tol` exists only so rounding.js can recognise prices saved by an earlier
+// deploy that lacked the storage tolerance. Everything else omits it.
+export function prettifyShelf(target, tol = ROUND_TOL) {
+  if (target >= PRESTIGE_100_FROM) return floorTo(target, 100, tol);
+  if (target >= PRESTIGE_50_FROM)  return floorTo(target, 50, tol);
 
-  const c = ceilTo(target, 5);
+  const c = ceilTo(target, 5, tol);
   if (c >= PRESTIGE_50_FROM) return PRESTIGE_50_FROM;
   if (c < 100) return c;
 
@@ -143,11 +145,41 @@ export function prettifyShelf(target) {
 
 // ── SUGGESTED PRICES ─────────────────────────────────────────
 
-export function suggestUAEPrice(priceUsedValue, priceCurrency, markupPercentage, rates) {
+const pf2 = v => v != null ? parseFloat(v.toFixed(2)) : null;
+
+export const DEFAULT_COST_MARGIN_PCT = 25;
+
+// The unrounded UAE shelf target (VAT-inclusive) for a vendor price after the
+// brand markup. Every UAE price is rounded from a target like this, exactly once.
+export function baseShelfFromPrice(priceUsedValue, priceCurrency, markupPercentage, rates) {
   if (priceUsedValue == null || !priceCurrency || !rates?.[priceCurrency]) return null;
   const inAED    = priceUsedValue * rates[priceCurrency];
   const markedUp = inAED * (1 + markupPercentage / 100);
-  return prettifyShelf(markedUp * 1.05) / 1.05;
+  return markedUp * 1.05;
+}
+
+// The unrounded UAE shelf target for an EXW cost at a target gross margin.
+// Pure EXW basis — no shipping, no customs (unlike calcProjectPrice).
+export function baseShelfFromCost(exwCost, costCurrency, targetMarginPct, rates) {
+  if (exwCost == null || !costCurrency || !rates?.[costCurrency]) return null;
+  const margin = (targetMarginPct ?? DEFAULT_COST_MARGIN_PCT) / 100;
+  if (!(margin > 0 && margin < 1)) return null;
+  const costAED = exwCost * rates[costCurrency];
+  return costAED / (1 - margin) * 1.05;
+}
+
+// The unrounded base target a pricing_master row's source implies.
+export function itemBaseShelf(item, { markup, rates }) {
+  if (item.price_used === 'cost_based') {
+    return baseShelfFromCost(toNum(item.exw_cost), item.cost_currency, toNum(item.target_margin_pct), rates);
+  }
+  const { value, currency } = resolvePriceUsed(item);
+  return baseShelfFromPrice(value, currency, markup ?? 10, rates);
+}
+
+export function suggestUAEPrice(priceUsedValue, priceCurrency, markupPercentage, rates) {
+  const target = baseShelfFromPrice(priceUsedValue, priceCurrency, markupPercentage, rates);
+  return target == null ? null : prettifyShelf(target) / 1.05;
 }
 
 // KSA: UAE ex-VAT × 1.03 market premium × 1.15 VAT, rounded on shelf, stored ex-VAT.
@@ -162,60 +194,73 @@ export function suggestQATPrice(msrp_aed) {
   return prettifyShelf(msrp_aed * 1.01);
 }
 
-// Apply additional markup to an already-rounded AED ex-VAT base, then round again.
+/**
+ * All six market prices from an unrounded base shelf target.
+ *
+ *   real_msrp_*  base markup only
+ *   msrp_*       with the brand's additional markup — the selling prices
+ *
+ * Both UAE prices round once, from the unrounded target. The additional markup
+ * applies to that target, never to the already-rounded base: rounding down twice
+ * would stack, e.g. a 7,598 base + 5% → 7,500 × 1.05 = 7,875 → 7,800 instead of
+ * 7,978 → 7,900. KSA and Qatar derive from the rounded UAE price.
+ */
+export function msrpsFromBaseShelf(baseShelf, additionalPct) {
+  if (baseShelf == null) return null;
+  const real_msrp_aed = pf2(prettifyShelf(baseShelf) / 1.05);
+  const msrp_aed = additionalPct
+    ? pf2(prettifyShelf(baseShelf * (1 + additionalPct / 100)) / 1.05)
+    : real_msrp_aed;
+  return {
+    real_msrp_aed,
+    real_msrp_sar: pf2(suggestKSAPrice(real_msrp_aed)),
+    real_msrp_qat: pf2(suggestQATPrice(real_msrp_aed)),
+    msrp_aed,
+    msrp_sar: pf2(suggestKSAPrice(msrp_aed)),
+    msrp_qat: pf2(suggestQATPrice(msrp_aed)),
+  };
+}
+
+// All six prices from a vendor price. If additionalMarkupPct is null/0, msrp_* === real_msrp_*.
+export function calcMSRPs(priceValue, priceCurrency, baseMarkupPct, additionalMarkupPct, rates) {
+  return msrpsFromBaseShelf(baseShelfFromPrice(priceValue, priceCurrency, baseMarkupPct, rates), additionalMarkupPct);
+}
+
+// All six prices from EXW cost by enforcing a target gross margin.
+export function calcCostBasedMSRPs(exwCost, costCurrency, targetMarginPct, rates, additionalMarkupPct = null) {
+  return msrpsFromBaseShelf(baseShelfFromCost(exwCost, costCurrency, targetMarginPct, rates), additionalMarkupPct);
+}
+
+// An additional markup on a stored, already-rounded base. Only for when the
+// unrounded target is unknown — see pricesAtAdditionalMarkup.
 export function applyAdditionalMarkupUAE(realMsrpAed, additionalPct) {
   if (!realMsrpAed || !additionalPct) return realMsrpAed;
   return prettifyShelf(realMsrpAed * (1 + additionalPct / 100) * 1.05) / 1.05;
 }
 
-// Compute all 6 MSRP fields from a source price — two prettification passes.
-// Pass 1: source → base markup → prettify → real_msrp_*
-// Pass 2: real_msrp_aed → additional markup → prettify → msrp_*
-// If additionalMarkupPct is null/0, msrp_* === real_msrp_*
-export function calcMSRPs(priceValue, priceCurrency, baseMarkupPct, additionalMarkupPct, rates) {
-  const pf2 = v => v != null ? parseFloat(v.toFixed(2)) : null;
-  const rawReal = suggestUAEPrice(priceValue, priceCurrency, baseMarkupPct, rates);
-  if (rawReal == null) return null;
-  const real_msrp_aed = pf2(rawReal);
-  const real_msrp_sar = pf2(suggestKSAPrice(real_msrp_aed));
-  const real_msrp_qat = pf2(suggestQATPrice(real_msrp_aed));
-  const msrp_aed = additionalMarkupPct
-    ? pf2(applyAdditionalMarkupUAE(real_msrp_aed, additionalMarkupPct))
-    : real_msrp_aed;
-  const msrp_sar = pf2(suggestKSAPrice(msrp_aed));
-  const msrp_qat = pf2(suggestQATPrice(msrp_aed));
-  return { real_msrp_aed, real_msrp_sar, real_msrp_qat, msrp_aed, msrp_sar, msrp_qat };
-}
-
-// ── COST-BASED PRICING ────────────────────────────────────────
-
-export const DEFAULT_COST_MARGIN_PCT = 25;
-
 /**
- * Compute all 6 MSRP fields from EXW cost by enforcing a target gross margin.
- * Pure EXW basis — no shipping, no customs (unlike calcProjectPrice).
+ * Selling prices for a stored item at a new additional markup, without
+ * repricing it.
  *
- * cost_aed     = exw_cost × FX rate
- * real_msrp    = cost_aed / (1 - margin%)  → ×1.05 VAT → prettifyShelf → ÷1.05
- * msrp_*       = real_msrp after optional additional-markup second pass (same as calcMSRPs)
- * KSA/QAT derived from the final AED via the standard formulas.
+ * The markup belongs on the unrounded base target, which is not stored. It is
+ * recovered from the item's source when the source, at today's rates and brand
+ * markup, still rounds to exactly the stored base — proof nothing has moved.
+ * Otherwise the stored base is the anchor and the markup goes on top of it:
+ * recomputing from source would apply today's exchange rate as a side effect
+ * of a markup change.
+ *
+ * @returns {{ msrp_aed, msrp_sar, msrp_qat, fromSource } | null}
  */
-export function calcCostBasedMSRPs(exwCost, costCurrency, targetMarginPct, rates, additionalMarkupPct = null) {
-  if (exwCost == null || !costCurrency || !rates?.[costCurrency]) return null;
-  const margin = (targetMarginPct ?? DEFAULT_COST_MARGIN_PCT) / 100;
-  if (!(margin > 0 && margin < 1)) return null;
-  const pf2           = v => v != null ? parseFloat(v.toFixed(2)) : null;
-  const costAED       = exwCost * rates[costCurrency];
-  const raw           = costAED / (1 - margin);
-  const real_msrp_aed = pf2(prettifyShelf(raw * 1.05) / 1.05);
-  const real_msrp_sar = pf2(suggestKSAPrice(real_msrp_aed));
-  const real_msrp_qat = pf2(suggestQATPrice(real_msrp_aed));
-  const msrp_aed = additionalMarkupPct
-    ? pf2(applyAdditionalMarkupUAE(real_msrp_aed, additionalMarkupPct))
-    : real_msrp_aed;
-  const msrp_sar = pf2(suggestKSAPrice(msrp_aed));
-  const msrp_qat = pf2(suggestQATPrice(msrp_aed));
-  return { real_msrp_aed, real_msrp_sar, real_msrp_qat, msrp_aed, msrp_sar, msrp_qat };
+export function pricesAtAdditionalMarkup(item, additionalPct, { markup, rates }) {
+  const storedBase = toNum(item.real_msrp_aed ?? item.msrp_aed);
+  if (!storedBase) return null;
+  const target = itemBaseShelf(item, { markup, rates });
+  if (target != null && pf2(prettifyShelf(target) / 1.05) === pf2(storedBase)) {
+    const { msrp_aed, msrp_sar, msrp_qat } = msrpsFromBaseShelf(target, additionalPct);
+    return { msrp_aed, msrp_sar, msrp_qat, fromSource: true };
+  }
+  const msrp_aed = pf2(applyAdditionalMarkupUAE(storedBase, additionalPct));
+  return { msrp_aed, msrp_sar: pf2(suggestKSAPrice(msrp_aed)), msrp_qat: pf2(suggestQATPrice(msrp_aed)), fromSource: false };
 }
 
 // ── EMPLOYEE PRICE ────────────────────────────────────────────

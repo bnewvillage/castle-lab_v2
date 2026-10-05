@@ -1,4 +1,4 @@
-import { prettifyShelf, suggestKSAPrice, suggestQATPrice, calcMSRPs, applyAdditionalMarkupUAE, ROUND_TOL } from './pricing';
+import { prettifyShelf, suggestKSAPrice, suggestQATPrice, calcMSRPs, calcCostBasedMSRPs, applyAdditionalMarkupUAE, pricesAtAdditionalMarkup, ROUND_TOL } from './pricing';
 import { reroundStored, planRounding, legacyUaeShelf, legacyMarketShelf, MARKETS } from './rounding';
 
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -280,4 +280,142 @@ describe('planRounding — the whole pass', () => {
 
 test('additional markup pass uses the new rule', () => {
   expect(round2(applyAdditionalMarkupUAE(2000, 5) * 1.05)).toBe(prettifyShelf(2000 * 1.05 * 1.05));
+});
+
+describe('additional markup — UAE rounds once', () => {
+  const rates = { EUR: 4.4, AED: 1 };
+  const k = (a) => round2(legacyMarketShelf(a * 1.03 * 1.15) / 1.15);
+  const q = (a) => round2(legacyMarketShelf(a * 1.01));
+  const shelf = (v, vat) => round2(Math.round(v * vat / 0.05) * 0.05);
+  // An item whose base target is 7,598.01 shelf (7,236.20 AED × 1.05, no base markup).
+  const swmt = (real, msrp, ksa, qat) => ({
+    item_code: 'SWMT-ADV', brand_code: 'SWMT', price_used: 'primary_ex_vat',
+    msrp_primary_ex_vat: 7236.2, msrp_primary_currency: 'AED',
+    real_msrp_aed: real, msrp_aed: msrp, msrp_sar: ksa(msrp), msrp_qat: qat(msrp),
+    real_msrp_sar: ksa(real), real_msrp_qat: qat(real),
+  });
+  const swmtRules = { SWMT: { markup: 0, additional: 5 } };
+
+  test('the additional markup goes on the unrounded base', () => {
+    const p = calcMSRPs(7236.2, 'AED', 0, 5, rates);
+    expect(shelf(p.real_msrp_aed, 1.05)).toBe(7500);     // base, for reference
+    expect(shelf(p.msrp_aed, 1.05)).toBe(7900);          // 7,977.91 → 7,900 — not 7,500 × 1.05 → 7,800
+    expect(shelf(p.msrp_sar, 1.15)).toBe(8900);
+    expect(p.msrp_qat).toBe(7500);
+    // No additional markup: one price, as before.
+    const n = calcMSRPs(7236.2, 'AED', 0, null, rates);
+    expect(n.msrp_aed).toBe(n.real_msrp_aed);
+  });
+
+  test('cost-based items work the same way', () => {
+    const p = calcCostBasedMSRPs(5427.15, 'AED', 25, rates, 5);   // 7,598.01 base target
+    expect(shelf(p.real_msrp_aed, 1.05)).toBe(7500);
+    expect(shelf(p.msrp_aed, 1.05)).toBe(7900);
+  });
+
+  test('old-rule price moves to the round-once price: KSA 9,005 → 8,900, not 8,700', () => {
+    const real = round2(legacyUaeShelf(7598.01) / 1.05);
+    const msrp = round2(legacyUaeShelf(real * 1.05 * 1.05) / 1.05);
+    const it = swmt(real, msrp, k, q);
+    expect([shelf(it.msrp_aed, 1.05), shelf(it.msrp_sar, 1.15)]).toEqual([7980, 9005]);
+    const { set } = planRounding([it], { rates, rules: swmtRules }).changes[0];
+    const fresh = calcMSRPs(7236.2, 'AED', 0, 5, rates);
+    expect(set.msrp_aed).toBe(fresh.msrp_aed);
+    expect(set.msrp_sar).toBe(fresh.msrp_sar);
+    expect(set.msrp_qat).toBe(fresh.msrp_qat);
+    expect(shelf(set.msrp_sar, 1.15)).toBe(8900);
+  });
+
+  test('prices saved by the second deploy (additional on the rounded base) are recognised and fixed', () => {
+    const real = round2(prettifyShelf(7598.01) / 1.05);                 // 7,500
+    const msrp = round2(applyAdditionalMarkupUAE(real, 5));             // 7,875 → 7,800
+    const ksa = (a) => round2(suggestKSAPrice(a)), qat = (a) => round2(suggestQATPrice(a));
+    const it = swmt(real, msrp, ksa, qat);
+    expect([shelf(it.msrp_aed, 1.05), shelf(it.msrp_sar, 1.15)]).toEqual([7800, 8700]);
+    const { changes, tally } = planRounding([it], { rates, rules: swmtRules });
+    expect(tally.aed.exact).toBe(1);
+    expect(shelf(changes[0].set.msrp_aed, 1.05)).toBe(7900);
+    expect(shelf(changes[0].set.msrp_sar, 1.15)).toBe(8900);
+    expect(changes[0].set.real_msrp_aed).toBeUndefined();               // the base was already right
+  });
+
+  test('prices saved by the first deploy (storage noise lost a step) are recognised and fixed', () => {
+    // WNDL-30184-110 saved between the two deploys: 5,000 base + 10% stored as 5,400 / 6,000 / 5,100.
+    const real = round2(5000 / 1.05);
+    const msrp = round2(5400 / 1.05);
+    const ksa = (a) => round2(suggestKSAPrice(a)), qat = (a) => round2(suggestQATPrice(a));
+    const it = {
+      item_code: 'WNDL-30184-110', brand_code: 'WNDL', price_used: 'primary_ex_vat',
+      msrp_primary_ex_vat: 1099, msrp_primary_currency: 'EUR',
+      real_msrp_aed: real, msrp_aed: msrp, msrp_sar: ksa(msrp), msrp_qat: qat(msrp),
+      real_msrp_sar: ksa(real), real_msrp_qat: qat(real),
+    };
+    expect(shelf(it.msrp_sar, 1.15)).toBe(6000);
+    const { set } = planRounding([it], { rates, rules: { WNDL: { markup: 0, additional: 10 } } }).changes[0];
+    expect(set.msrp_aed).toBe(5238.10);     // 5,500
+    expect(set.msrp_sar).toBe(5391.30);     // 6,200
+    expect(set.msrp_qat).toBe(5200);
+  });
+
+  test('a price no pipeline made from today\'s inputs is re-rounded, never recalculated', () => {
+    // The brand markup moved since this was priced: the source no longer reproduces it.
+    const real = round2(legacyUaeShelf(7598.01) / 1.05);
+    const msrp = round2(legacyUaeShelf(real * 1.05 * 1.05) / 1.05);
+    const it = swmt(real, msrp, k, q);
+    const { tally, changes } = planRounding([it], { rates, rules: { SWMT: { markup: 3, additional: 5 } } });
+    expect(tally.aed.exact).toBe(0);
+    expect(Math.abs(changes[0].set.msrp_aed - it.msrp_aed) * 1.05).toBeLessThanOrEqual(100.01);
+  });
+
+  test('running the plan twice changes nothing the second time, with an additional markup', () => {
+    const items = [];
+    for (let v = 300; v < 9000; v += 37.7) {
+      const real = round2(legacyUaeShelf(v * 1.05) / 1.05);
+      const msrp = round2(legacyUaeShelf(real * 1.05 * 1.05) / 1.05);
+      items.push({ ...swmt(real, msrp, k, q), item_code: `S${v}`, msrp_primary_ex_vat: v });
+    }
+    const first = planRounding(items, { rates, rules: swmtRules });
+    const applied = items.map(it => ({ ...it, ...(first.changes.find(c => c.item_code === it.item_code)?.set ?? {}) }));
+    expect(planRounding(applied, { rates, rules: swmtRules }).changes).toHaveLength(0);
+    for (const it of applied) {
+      const fresh = calcMSRPs(it.msrp_primary_ex_vat, 'AED', 0, 5, rates);
+      expect([it.msrp_aed, it.msrp_sar, it.msrp_qat]).toEqual([fresh.msrp_aed, fresh.msrp_sar, fresh.msrp_qat]);
+    }
+  });
+});
+
+describe('pricesAtAdditionalMarkup — Global Markup', () => {
+  const rates = { AED: 1, EUR: 4.4 };
+  const base = (value) => ({
+    price_used: 'primary_ex_vat', msrp_primary_ex_vat: value, msrp_primary_currency: 'AED',
+    real_msrp_aed: round2(prettifyShelf(value * 1.05) / 1.05),
+  });
+
+  test('uses the unrounded base when the source still proves it', () => {
+    const p = pricesAtAdditionalMarkup(base(7236.2), 5, { markup: 0, rates });
+    expect(p.fromSource).toBe(true);
+    expect(round2(p.msrp_aed * 1.05)).toBe(7900);
+    expect(p.msrp_sar).toBe(round2(suggestKSAPrice(p.msrp_aed)));
+  });
+
+  test('falls back to the stored base when rates or markup have moved — never reprices', () => {
+    const it = base(7236.2);
+    const p = pricesAtAdditionalMarkup(it, 5, { markup: 0, rates: { AED: 1.2 } });
+    expect(p.fromSource).toBe(false);
+    expect(p.msrp_aed).toBe(round2(applyAdditionalMarkupUAE(it.real_msrp_aed, 5)));
+  });
+
+  test('0% reverts to the base', () => {
+    const it = base(7236.2);
+    expect(pricesAtAdditionalMarkup(it, 0, { markup: 0, rates }).msrp_aed).toBe(it.real_msrp_aed);
+    expect(pricesAtAdditionalMarkup(it, 0, { markup: 0, rates: { AED: 1.2 } }).msrp_aed).toBe(it.real_msrp_aed);
+  });
+
+  test('cost-based items are recognised from their cost and margin', () => {
+    const it = { price_used: 'cost_based', exw_cost: 5427.15, cost_currency: 'AED', target_margin_pct: 25,
+      real_msrp_aed: round2(7500 / 1.05) };
+    const p = pricesAtAdditionalMarkup(it, 5, { markup: 10, rates });
+    expect(p.fromSource).toBe(true);
+    expect(round2(p.msrp_aed * 1.05)).toBe(7900);
+  });
 });
