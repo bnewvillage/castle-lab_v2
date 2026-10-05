@@ -38,10 +38,12 @@ describe('prettifyShelf — the rule', () => {
     }
   });
 
-  test('KSA and Qatar follow the same rule — SCHB-4156218360', () => {
-    expect(round2(prettifyShelf(2971.43 * 1.05))).toBe(3100);
-    expect(round2(suggestKSAPrice(2971.43) * 1.15)).toBe(3500);
-    expect(suggestQATPrice(2971.43)).toBe(3000);
+  // The rule only, fed one fixed UAE price. Not what any item ends up at: once
+  // UAE re-rounds, KSA and Qatar derive from the new UAE price (see the
+  // SCHB-4156218360 test under planRounding).
+  test('KSA and Qatar apply the same rule to their own target', () => {
+    expect(round2(suggestKSAPrice(2971.43) * 1.15)).toBe(3500);   // 3,519.66 target
+    expect(suggestQATPrice(2971.43)).toBe(3000);                   // 3,001.14 target
   });
 });
 
@@ -149,6 +151,30 @@ describe('planRounding — the whole pass', () => {
     expect(set.real_msrp_aed).toBeUndefined();
     expect(set.msrp_sar).toBe(round2(suggestKSAPrice(3000)));   // 3,553.5 target → 3,550 shelf
     expect(set.msrp_qat).toBe(suggestQATPrice(3000));           // 3,030 target → 3,000
+  });
+
+  test('SCHB-4156218360 ends at UAE 3,100 / KSA 3,450 / Qatar 2,985', () => {
+    // Stored prices as live on 30 Sept 2026 (old rule: shelf 3,120 / 3,520 / 3,005).
+    const live = {
+      item_code: 'SCHB-4156218360', brand_code: 'SCHB',
+      msrp_aed: 2971.43, msrp_sar: 3060.87, msrp_qat: 3005,
+      real_msrp_aed: 2971.43, real_msrp_sar: 3060.87, real_msrp_qat: 3005,
+      uae_overridden: false, ksa_overridden: false, qat_overridden: false,
+      updated_at: '2026-09-30T00:00:00Z',
+    };
+    const { changes } = planRounding([live], { rates: {}, rules: {} });
+    const { set } = changes[0];
+    expect(round2(set.msrp_aed * 1.05)).toBe(3100);
+    expect(set.msrp_aed).toBe(2952.38);
+    // KSA derives from the re-rounded UAE price: 2,952.38 × 1.03 × 1.15 =
+    // 3,497.09, floored to 3,450 — not 3,500, which the old UAE price gives.
+    expect(round2(set.msrp_sar * 1.15)).toBe(3450);
+    expect(set.msrp_sar).toBe(3000);
+    // 2,952.38 × 1.01 = 2,981.90, under 3,000 so up to the 5.
+    expect(set.msrp_qat).toBe(2985);
+    expect(set.real_msrp_aed).toBe(2952.38);
+    expect(set.real_msrp_sar).toBe(3000);
+    expect(set.real_msrp_qat).toBe(2985);
   });
 
   test('drifted exchange rate: prices are re-rounded, never repriced', () => {
