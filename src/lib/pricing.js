@@ -117,11 +117,15 @@ export function calcAllMargins(item, rates) {
 export const PRESTIGE_50_FROM  = 3000;
 export const PRESTIGE_100_FROM = 5000;
 
-// Float noise must not cost a whole step: 3049.9999999 is 3,050 and
-// 3120.0000000001 is 3,120, not 3,125. Far below any real price difference.
-const EPS = 1e-9;
-const ceilTo  = (v, step) => (Math.ceil(v / step - EPS) * step) || 0;
-const floorTo = (v, step) => (Math.floor(v / step + EPS) * step) || 0;
+// Storage noise must not cost a whole step. Prices are stored ex-VAT at 2dp, and
+// a second pass (additional markup, KSA, Qatar) starts from that stored value,
+// so its target carries up to half a fils × the multiplier: a 5,000 base stored
+// as 4,761.90, plus 10%, is 5,499.9945 — which must round to 5,500, not 5,400.
+// Anything less than a fils from a mark is treated as on it (the worst noise,
+// a 50% additional markup, is 0.008); a genuine target a fils off is not.
+export const ROUND_TOL = 0.009;
+const ceilTo  = (v, step) => (Math.ceil((v - ROUND_TOL) / step) * step) || 0;
+const floorTo = (v, step) => (Math.floor((v + ROUND_TOL) / step) * step) || 0;
 
 export function prettifyShelf(target) {
   if (target >= PRESTIGE_100_FROM) return floorTo(target, 100);

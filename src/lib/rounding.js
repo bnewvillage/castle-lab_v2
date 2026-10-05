@@ -87,7 +87,9 @@ function uaeSource(item, { rates, rules }) {
 
 // ── Re-round a single stored price (the fallback path) ──
 const SHELF_TOLERANCE = 0.0075;            // 2dp ex-VAT storage drifts by < half a fils × VAT
-const below = (shelf) => prettifyShelf(shelf - 0.001);
+// The new rule applied just under a shelf price — the target sat below it.
+// Must step further down than prettifyShelf's tolerance, or it lands back on it.
+const below = (shelf) => prettifyShelf(shelf - 0.05);
 
 /**
  * @returns {{ status, value?, before?, after? }}

@@ -1,4 +1,4 @@
-import { prettifyShelf, suggestKSAPrice, suggestQATPrice, calcMSRPs, applyAdditionalMarkupUAE } from './pricing';
+import { prettifyShelf, suggestKSAPrice, suggestQATPrice, calcMSRPs, applyAdditionalMarkupUAE, ROUND_TOL } from './pricing';
 import { reroundStored, planRounding, legacyUaeShelf, legacyMarketShelf, MARKETS } from './rounding';
 
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -38,6 +38,26 @@ describe('prettifyShelf — the rule', () => {
     }
   });
 
+  test('a second pass from a 2dp stored price never loses or gains a step', () => {
+    // 5,000 base stored as 4,761.90; +10% = 5,499.9945 → 5,500, not 5,400.
+    expect(round2(applyAdditionalMarkupUAE(round2(5000 / 1.05), 10) * 1.05)).toBe(5500);
+    // 3,000 base stored as 2,857.14; +10% = 3,299.9967 → 3,300, not 3,250.
+    expect(round2(applyAdditionalMarkupUAE(round2(3000 / 1.05), 10) * 1.05)).toBe(3300);
+    // 1,150 base stored as 1,095.24 (rounded up); +10% = 1,265.0022 → 1,265, not 1,270.
+    expect(round2(applyAdditionalMarkupUAE(round2(1150 / 1.05), 10) * 1.05)).toBe(1265);
+    // Every base shelf price the rule can make, through common additional markups,
+    // lands where the same markup on the exact shelf price would.
+    const bases = new Set();
+    for (let i = 2000; i <= 400000; i++) bases.add(prettifyShelf(i * 0.05));
+    for (const base of bases) {
+      if (base < 100) continue;
+      for (const add of [2.5, 5, 7.5, 10, 12.5, 15, 20, 25, 30, 50]) {
+        const exact = prettifyShelf(base * (1 + add / 100));
+        expect(round2(applyAdditionalMarkupUAE(round2(base / 1.05), add) * 1.05)).toBe(exact);
+      }
+    }
+  });
+
   // The rule only, fed one fixed UAE price. Not what any item ends up at: once
   // UAE re-rounds, KSA and Qatar derive from the new UAE price (see the
   // SCHB-4156218360 test under planRounding).
@@ -54,6 +74,11 @@ describe('reroundStored — inferring the target from an old price', () => {
     const { vat } = MARKETS[market];
     let exact = 0, approxRight = 0, approxHigh = 0;
     for (const t of targets()) {
+      // A target under a fils either side of a 5 mark: the new rule treats it as
+      // on the mark, the old one (no tolerance) did not. Not recoverable from
+      // the stored price, and never more than a fils of real difference.
+      const off5 = t - Math.floor(t / 5) * 5;
+      if ((off5 > 0 && off5 < ROUND_TOL) || off5 > 5 - ROUND_TOL) continue;
       const stored = round2(oldShelf(t) / vat);
       const r = reroundStored(stored, market, { savedAfterCutoff: false });
       expect(r.status).not.toBe('manual');
@@ -175,6 +200,29 @@ describe('planRounding — the whole pass', () => {
     expect(set.real_msrp_aed).toBe(2952.38);
     expect(set.real_msrp_sar).toBe(3000);
     expect(set.real_msrp_qat).toBe(2985);
+  });
+
+  test('WNDL-30184-110 (1,099 EUR at 4.4, 10% additional) ends at 5,500 / 6,200 / 5,200', () => {
+    const wndlRates = { EUR: 4.4 };
+    const wndlRules = { WNDL: { markup: 0, additional: 10 } };
+    const real = round2(legacyUaeShelf(1099 * 4.4 * 1.05) / 1.05);                 // 5,080 shelf
+    const msrp = round2(legacyUaeShelf(real * 1.1 * 1.05) / 1.05);                 // 5,590 shelf
+    const k = (a) => round2(legacyMarketShelf(a * 1.03 * 1.15) / 1.15);
+    const q = (a) => round2(legacyMarketShelf(a * 1.01));
+    const it = {
+      item_code: 'WNDL-30184-110', brand_code: 'WNDL', price_used: 'primary_ex_vat',
+      msrp_primary_ex_vat: 1099, msrp_primary_currency: 'EUR',
+      msrp_aed: msrp, msrp_sar: k(msrp), msrp_qat: q(msrp),
+      real_msrp_aed: real, real_msrp_sar: k(real), real_msrp_qat: q(real),
+    };
+    expect(round2(it.msrp_sar * 1.15)).toBe(6310);
+    const { set } = planRounding([it], { rates: wndlRates, rules: wndlRules }).changes[0];
+    expect(set.msrp_aed).toBe(5238.10);    // 5,500 shelf
+    expect(set.msrp_sar).toBe(5391.30);    // 6,200 shelf
+    expect(set.msrp_qat).toBe(5200);
+    // …and exactly what a fresh save gives.
+    const fresh = calcMSRPs(1099, 'EUR', 0, 10, wndlRates);
+    expect([set.msrp_aed, set.msrp_sar, set.msrp_qat]).toEqual([fresh.msrp_aed, fresh.msrp_sar, fresh.msrp_qat]);
   });
 
   test('drifted exchange rate: prices are re-rounded, never repriced', () => {
