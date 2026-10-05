@@ -10,6 +10,7 @@
 // backend for the length of a session. A page reload reseeds.
 // ─────────────────────────────────────────────────────────────
 import { calcMSRPs, calcCostBasedMSRPs, calcProjectPrice } from '../lib/pricing';
+import { legacyUaeShelf, legacyMarketShelf } from '../lib/rounding';
 
 // ── Exchange rates (to AED) ───────────────────────────────────
 export const RATES = {
@@ -71,6 +72,20 @@ function daysAgo(n) {
 }
 
 // ── Build one brand's items ───────────────────────────────────
+// Prices an item with the rounding rule in force before Oct 2026, so the demo
+// catalogue has prices for Automations → Price Rounding to move. Same pipeline
+// and multiplication order as the old pricing code.
+function legacyPrices(uaeShelfTarget, additional) {
+  const k = (aed) => pf2(legacyMarketShelf(aed * 1.03 * 1.15) / 1.15);
+  const q = (aed) => pf2(legacyMarketShelf(aed * 1.01));
+  const real = pf2(legacyUaeShelf(uaeShelfTarget) / 1.05);
+  const msrp = additional ? pf2(legacyUaeShelf(real * (1 + additional / 100) * 1.05) / 1.05) : real;
+  return {
+    real_msrp_aed: real, real_msrp_sar: k(real), real_msrp_qat: q(real),
+    msrp_aed: msrp, msrp_sar: k(msrp), msrp_qat: q(msrp),
+  };
+}
+
 function buildBrandItems(def, rng) {
   const items = [];
   for (let i = 0; i < def.count; i++) {
@@ -123,7 +138,9 @@ function buildBrandItems(def, rng) {
 
     if (costBased) {
       const target_margin_pct = pick(rng, [22, 25, 28, 30]);
-      const msrps = calcCostBasedMSRPs(exw_cost, cost_currency, target_margin_pct, RATES);
+      const msrps = i % 4 === 0
+        ? legacyPrices(exw_cost * RATES[cost_currency] / (1 - target_margin_pct / 100) * 1.05, null)
+        : calcCostBasedMSRPs(exw_cost, cost_currency, target_margin_pct, RATES);
       row = {
         ...row,
         price_used: 'cost_based',
@@ -136,7 +153,9 @@ function buildBrandItems(def, rng) {
       const msrp_primary_ex_vat = pf2(exw_cost * (1.9 + rng() * 0.9));
       const msrp_primary_inc_vat = pf2(msrp_primary_ex_vat * 1.2);
       const hasSecondary = rng() < 0.35;
-      const msrps = calcMSRPs(msrp_primary_ex_vat, msrp_primary_currency, def.markup, def.additional, RATES);
+      const msrps = i % 4 === 0
+        ? legacyPrices(msrp_primary_ex_vat * RATES[msrp_primary_currency] * (1 + def.markup / 100) * 1.05, def.additional)
+        : calcMSRPs(msrp_primary_ex_vat, msrp_primary_currency, def.markup, def.additional, RATES);
       row = {
         ...row,
         msrp_primary_currency,

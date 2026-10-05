@@ -499,3 +499,36 @@ export async function renameItemCodes(pairs) {
   }
   return { renamed, historyRows };
 }
+
+// ── PRICE ROUNDING ────────────────────────────────────────────
+export async function fetchAllItemsForRounding() {
+  await wait(120);
+  return store.pricingMaster.map(clone);
+}
+
+// Mirrors apply_price_rounding: compare-and-set on all six prices, history
+// written only for rows that actually changed.
+export async function applyPriceRounding(batchId, changes, onProgress) {
+  await wait(200);
+  const FIELDS = ['msrp_aed', 'msrp_sar', 'msrp_qat', 'real_msrp_aed', 'real_msrp_sar', 'real_msrp_qat'];
+  const eq = (a, b) => (a == null && b == null) || (a != null && b != null && Number(a) === Number(b));
+  const now = new Date().toISOString();
+  let id = store.priceHistory.reduce((m, h) => Math.max(m, h.id || 0), 0);
+  let applied = 0;
+  for (const c of changes) {
+    const item = store.pricingMaster.find(i => i.item_code === c.item_code);
+    if (!item || !FIELDS.every(f => eq(item[f] ?? null, c.expect[f] ?? null))) continue;
+    const before = { msrp_aed: item.msrp_aed ?? null, msrp_sar: item.msrp_sar ?? null, msrp_qat: item.msrp_qat ?? null };
+    Object.assign(item, c.set, { updated_at: now, updated_by: DEMO_USER.email });
+    store.priceHistory.push({
+      id: ++id, item_code: item.item_code, brand_code: item.brand_code, batch_id: batchId,
+      operation_type: 'rounding_rule', changed_at: now, changed_by: DEMO_USER.email,
+      old_msrp_aed: before.msrp_aed, new_msrp_aed: 'msrp_aed' in c.set ? item.msrp_aed : null,
+      old_msrp_sar: before.msrp_sar, new_msrp_sar: 'msrp_sar' in c.set ? item.msrp_sar : null,
+      old_msrp_qat: before.msrp_qat, new_msrp_qat: 'msrp_qat' in c.set ? item.msrp_qat : null,
+    });
+    applied++;
+  }
+  onProgress?.(changes.length, applied);
+  return applied;
+}

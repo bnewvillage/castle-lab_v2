@@ -100,14 +100,41 @@ export function calcAllMargins(item, rates) {
   };
 }
 
-// ── MOD REMOVAL ───────────────────────────────────────────────
+// ── SHELF-PRICE ROUNDING ──────────────────────────────────────
+// Every market price is rounded on its shelf amount — VAT-inclusive where the
+// market has VAT — and stored ex-VAT. One rule for UAE, KSA and Qatar:
+//
+//   under 3,000    round up to 5; a price within 5 (under 1,000) or 10 (1,000+)
+//                  above a round hundred snaps down to it; round hundreds then
+//                  become …99. The 3,000 mark itself is never charmed: it stays
+//                  3,000, so a charm price never sits beside its round twin.
+//   3,000 – 4,999  round the target DOWN to the 50
+//   5,000+         round the target DOWN to the 100
+//
+// The prestige bands floor the raw target, never a rounded-up one. Rounding up
+// to 5 first would push anything within 5 of a 50/100 mark up instead of down,
+// so "prestige rounds down" would quietly fail for one price in ten.
+export const PRESTIGE_50_FROM  = 3000;
+export const PRESTIGE_100_FROM = 5000;
 
-export function removeMOD(ceiled) {
-  const modMark = ceiled < 100 ? 0 : ceiled < 1000 ? 5 : ceiled < 5000 ? 10 : 20;
-  const modDiv  = ceiled < 100 ? 1 : 100;
-  const mod     = ceiled % modDiv;
-  const removed = ceiled - (mod > modMark ? 0 : mod);
-  return String(removed).slice(-2) === '00' ? removed - 0.05 : removed;
+// Float noise must not cost a whole step: 3049.9999999 is 3,050 and
+// 3120.0000000001 is 3,120, not 3,125. Far below any real price difference.
+const EPS = 1e-9;
+const ceilTo  = (v, step) => (Math.ceil(v / step - EPS) * step) || 0;
+const floorTo = (v, step) => (Math.floor(v / step + EPS) * step) || 0;
+
+export function prettifyShelf(target) {
+  if (target >= PRESTIGE_100_FROM) return floorTo(target, 100);
+  if (target >= PRESTIGE_50_FROM)  return floorTo(target, 50);
+
+  const c = ceilTo(target, 5);
+  if (c >= PRESTIGE_50_FROM) return PRESTIGE_50_FROM;
+  if (c < 100) return c;
+
+  const snap    = c < 1000 ? 5 : 10;
+  const mod     = c % 100;
+  const snapped = mod <= snap ? c - mod : c;
+  return snapped % 100 === 0 ? snapped - 1 : snapped;
 }
 
 // ── SUGGESTED PRICES ─────────────────────────────────────────
@@ -116,34 +143,25 @@ export function suggestUAEPrice(priceUsedValue, priceCurrency, markupPercentage,
   if (priceUsedValue == null || !priceCurrency || !rates?.[priceCurrency]) return null;
   const inAED    = priceUsedValue * rates[priceCurrency];
   const markedUp = inAED * (1 + markupPercentage / 100);
-  const vatted   = markedUp * 1.05;
-  const ceiled   = Math.ceil(vatted / 5) * 5;
-  const modded   = removeMOD(ceiled);
-  return modded / 1.05;
+  return prettifyShelf(markedUp * 1.05) / 1.05;
 }
 
+// KSA: UAE ex-VAT × 1.03 market premium × 1.15 VAT, rounded on shelf, stored ex-VAT.
 export function suggestKSAPrice(msrp_aed) {
   if (msrp_aed == null) return null;
-  const raw    = msrp_aed * 1.03 * 1.15;
-  const ceiled = Math.ceil(raw / 5) * 5;
-  const modded = String(ceiled).slice(-2) === '00' ? ceiled - 0.05 : ceiled;
-  return modded / 1.15;
+  return prettifyShelf(msrp_aed * 1.03 * 1.15) / 1.15;
 }
 
+// Qatar: UAE ex-VAT × 1.01 market premium. No VAT, so shelf and stored agree.
 export function suggestQATPrice(msrp_aed) {
   if (msrp_aed == null) return null;
-  const raw    = msrp_aed * 1.01;
-  const ceiled = Math.ceil(raw / 5) * 5;
-  return String(ceiled).slice(-2) === '00' ? ceiled - 0.05 : ceiled;
+  return prettifyShelf(msrp_aed * 1.01);
 }
 
-// Apply additional markup to an already-prettified AED ex-VAT base, then re-prettify.
-// base (ex-VAT) → ×(1+add%) → ×1.05 VAT → ceil/5 → removeMOD → ÷1.05
+// Apply additional markup to an already-rounded AED ex-VAT base, then round again.
 export function applyAdditionalMarkupUAE(realMsrpAed, additionalPct) {
   if (!realMsrpAed || !additionalPct) return realMsrpAed;
-  const vatted = realMsrpAed * (1 + additionalPct / 100) * 1.05;
-  const ceiled = Math.ceil(vatted / 5) * 5;
-  return removeMOD(ceiled) / 1.05;
+  return prettifyShelf(realMsrpAed * (1 + additionalPct / 100) * 1.05) / 1.05;
 }
 
 // Compute all 6 MSRP fields from a source price — two prettification passes.
@@ -174,7 +192,7 @@ export const DEFAULT_COST_MARGIN_PCT = 25;
  * Pure EXW basis — no shipping, no customs (unlike calcProjectPrice).
  *
  * cost_aed     = exw_cost × FX rate
- * real_msrp    = cost_aed / (1 - margin%)  → ×1.05 VAT → ceil/5 → removeMOD → ÷1.05
+ * real_msrp    = cost_aed / (1 - margin%)  → ×1.05 VAT → prettifyShelf → ÷1.05
  * msrp_*       = real_msrp after optional additional-markup second pass (same as calcMSRPs)
  * KSA/QAT derived from the final AED via the standard formulas.
  */
@@ -185,9 +203,7 @@ export function calcCostBasedMSRPs(exwCost, costCurrency, targetMarginPct, rates
   const pf2           = v => v != null ? parseFloat(v.toFixed(2)) : null;
   const costAED       = exwCost * rates[costCurrency];
   const raw           = costAED / (1 - margin);
-  const vatted        = raw * 1.05;
-  const ceiled        = Math.ceil(vatted / 5) * 5;
-  const real_msrp_aed = pf2(removeMOD(ceiled) / 1.05);
+  const real_msrp_aed = pf2(prettifyShelf(raw * 1.05) / 1.05);
   const real_msrp_sar = pf2(suggestKSAPrice(real_msrp_aed));
   const real_msrp_qat = pf2(suggestQATPrice(real_msrp_aed));
   const msrp_aed = additionalMarkupPct
@@ -244,9 +260,7 @@ export function calcProjectPrice({ cost, cost_currency, shipping_rate, customs_d
   const landedSrc         = costExCustomsSrc * (1 + duty);
   const landedAED         = landedSrc * rate;
   const raw               = landedAED / (1 - margin);   // gross margin target on landed cost
-  const vatted            = raw * 1.05;
-  const ceiled            = Math.ceil(vatted / 5) * 5;
-  const incVat            = removeMOD(ceiled);
+  const incVat            = prettifyShelf(raw * 1.05);
   const exVat             = parseFloat((incVat / 1.05).toFixed(2));
   return {
     msrp_aed_inc_vat:      parseFloat(incVat.toFixed(2)),
