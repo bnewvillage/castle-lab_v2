@@ -1,7 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import {
-  IconGrid, IconTag, IconUpload, IconList, IconBookmark, IconFolder,
+  IconGrid, IconTag, IconUpload, IconList, IconBookmark, IconFolder, IconRefresh,
   IconHistory, IconFileExport, IconPercent, IconLogout,
 } from './icons';
 
@@ -28,6 +28,7 @@ const NAV = [
     items: [
       { label: 'ERP Automation',   icon: IconFileExport, path: '/apps/others/erp-export' },
       { label: 'Global Markup',    icon: IconPercent,    path: '/apps/others/global-markup' },
+      { label: 'Price Rounding',   icon: IconRefresh,    path: '/apps/others/rounding' },
     ],
   },
 ];

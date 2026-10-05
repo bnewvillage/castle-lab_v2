@@ -693,3 +693,46 @@ export async function renameItemCodes(pairs) {
   if (error) throw error;
   return { renamed: data?.renamed ?? 0, historyRows: data?.history_rows ?? 0 };
 }
+
+// ── PRICE ROUNDING ────────────────────────────────────────────
+const ROUNDING_FIELDS = 'item_code, item_name, brand_code, price_used, '
+  + 'msrp_primary_ex_vat, msrp_primary_inc_vat, msrp_primary_currency, '
+  + 'msrp_secondary_ex_vat, msrp_secondary_inc_vat, msrp_secondary_currency, '
+  + 'exw_cost, cost_currency, target_margin_pct, '
+  + 'msrp_aed, msrp_sar, msrp_qat, real_msrp_aed, real_msrp_sar, real_msrp_qat, '
+  + 'uae_overridden, ksa_overridden, qat_overridden, updated_at';
+
+// Reads the whole catalogue with keyset pagination: each page seeks past the
+// last code seen instead of OFFSET-scanning everything before it. Stops only on
+// an empty page, so a server max_rows cap below the requested size cannot
+// silently truncate the result.
+export async function fetchAllItemsForRounding() {
+  const all = [];
+  let after = null;
+  for (;;) {
+    let q = supabase.from('pricing_master').select(ROUNDING_FIELDS).order('item_code').limit(1000);
+    if (after != null) q = q.gt('item_code', after);
+    const { data, error } = await q;
+    if (error) throw error;
+    if (!data?.length) break;
+    all.push(...data);
+    after = data[data.length - 1].item_code;
+  }
+  return all;
+}
+
+// Applies a planned re-round. Each chunk is one transaction that changes the
+// prices and writes their Rollback history together, and skips any item edited
+// since the preview (see the migration). Returns how many items were applied.
+export async function applyPriceRounding(batchId, changes, onProgress) {
+  let applied = 0;
+  const chunks = chunkArray(changes, CHUNK);
+  for (let i = 0; i < chunks.length; i++) {
+    const payload = chunks[i].map(({ item_code, set, expect }) => ({ item_code, set, expect }));
+    const { data, error } = await supabase.rpc('apply_price_rounding', { p_batch_id: batchId, p_changes: payload });
+    if (error) { error.appliedSoFar = applied; throw error; }
+    applied += data?.applied ?? 0;
+    onProgress?.(Math.min((i + 1) * CHUNK, changes.length), applied);
+  }
+  return applied;
+}

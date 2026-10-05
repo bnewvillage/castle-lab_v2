@@ -10,6 +10,7 @@ const OP_LABELS = {
   single_edit:    'Single Edit',
   bulk_import:    'Bulk Import',
   markup_change:  'Markup Change',
+  rounding_rule:  'Rounding Rule',
 };
 
 const OP_COLORS = {
@@ -17,6 +18,7 @@ const OP_COLORS = {
   single_edit:   t.blue,
   bulk_import:   t.green,
   markup_change: '#c084fc',
+  rounding_rule: t.green,
 };
 
 function fmt(val) {

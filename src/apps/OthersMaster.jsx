@@ -6,11 +6,13 @@ import { IconDownload } from '../components/icons';
 import ERPAutomation from './others/ERPAutomation';
 import CostLookup from './others/CostLookup';
 import GlobalMarkupExport from './others/GlobalMarkupExport';
+import PriceRounding from './others/PriceRounding';
 
 const MODULES = {
   'erp-export':    { label: 'ERP Automation', description: 'Price export, item coverage check, and combined price match report.' },
   'cost-lookup':   { label: 'Cost Lookup',    description: 'Paste a list of item codes and get their EXW costs back.' },
   'global-markup': { label: 'Global Markup',  description: 'Apply and export portfolio-wide markup adjustments.' },
+  'rounding':      { label: 'Price Rounding', description: 'Move stored prices onto the current rounding rule, with a preview and one-step rollback.' },
 };
 
 export default function OthersMaster() {
@@ -68,6 +70,11 @@ export default function OthersMaster() {
           {tab === 'global-markup' && (
             <motion.div key="gm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
               <GlobalMarkupExport setExportActions={setExportActions} />
+            </motion.div>
+          )}
+          {tab === 'rounding' && (
+            <motion.div key="rnd" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
+              <PriceRounding />
             </motion.div>
           )}
         </AnimatePresence>
