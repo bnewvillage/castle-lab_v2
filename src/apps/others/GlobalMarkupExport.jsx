@@ -1,29 +1,23 @@
 import { useState, useEffect, useMemo } from 'react';
 import { fetchBrandsWithStats, fetchBrandItems, fetchRates, updateBrandAdditionalMarkup, insertPriceHistoryBatch, bulkInsertPriceHistory, bulkUpdateMarkupPrices } from '../../lib/db';
-import { applyAdditionalMarkupUAE, suggestKSAPrice, suggestQATPrice, compoundMarkup } from '../../lib/pricing';
+import { pricesAtAdditionalMarkup, compoundMarkup } from '../../lib/pricing';
 import { t, inp, btnW, btnG, lbl, groupBox } from '../pricing/styles';
 import { useAuth } from '../../lib/AuthContext';
 import { downloadCSV } from '../../lib/csvExport';
 import { downloadXLSX } from '../../lib/xlsxExport';
 
 
-// Apply additional markup to the stored real_msrp_aed (prettified base), re-prettify, derive SAR/QAT.
-// Uses real_msrp_aed as the anchor — idempotent across repeated calls with the same %.
-function computePricesWithMarkup(item, additionalPct) {
-  const pf2 = v => v != null ? parseFloat(v.toFixed(2)) : null;
-  const baseAed = item.real_msrp_aed ?? item.msrp_aed;
-  if (!baseAed) return { new_aed: null, new_sar: null, new_qat: null };
-
-  const aedForDerivation = pf2(applyAdditionalMarkupUAE(baseAed, additionalPct));
-  const new_aed = !item.uae_overridden ? aedForDerivation : null;
-  const new_sar = (!item.ksa_overridden && aedForDerivation != null)
-    ? pf2(suggestKSAPrice(aedForDerivation) ?? item.msrp_sar)
-    : null;
-  const new_qat = (!item.qat_overridden && aedForDerivation != null)
-    ? pf2(suggestQATPrice(aedForDerivation) ?? item.msrp_qat)
-    : null;
-
-  return { new_aed, new_sar, new_qat };
+// The additional markup goes on the unrounded base when the item's source still
+// proves it, otherwise on the stored real_msrp_aed (see pricesAtAdditionalMarkup).
+// Idempotent across repeated calls with the same %.
+function computePricesWithMarkup(item, additionalPct, ctx) {
+  const p = pricesAtAdditionalMarkup(item, additionalPct, ctx);
+  if (!p) return { new_aed: null, new_sar: null, new_qat: null };
+  return {
+    new_aed: !item.uae_overridden ? p.msrp_aed : null,
+    new_sar: !item.ksa_overridden ? p.msrp_sar : null,
+    new_qat: !item.qat_overridden ? p.msrp_qat : null,
+  };
 }
 
 // ── FILTER DROPDOWN ──────────────────────────────────────────
@@ -248,7 +242,7 @@ export default function GlobalMarkupExport({ setExportActions }) {
 
         const items = await fetchBrandItems(brand.brand_code);
         for (const item of items) {
-          const { new_aed, new_sar, new_qat } = computePricesWithMarkup(item, additional);
+          const { new_aed, new_sar, new_qat } = computePricesWithMarkup(item, additional, { markup: brand.markup_percentage, rates });
 
           historyRows.push({
             item_code:    item.item_code,
@@ -392,7 +386,7 @@ export default function GlobalMarkupExport({ setExportActions }) {
         addLog(`  ${items.length} items fetched`);
 
         for (const item of items) {
-          const { new_aed, new_sar, new_qat } = computePricesWithMarkup(item, additional);
+          const { new_aed, new_sar, new_qat } = computePricesWithMarkup(item, additional, { markup: brand.markup_percentage, rates });
 
           rows.push({
             item_code: item.item_code,

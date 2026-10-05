@@ -508,7 +508,7 @@ export async function fetchBrandItems(brandCode) {
   const code = brandCode.toUpperCase();
   return fetchAllPages((from, to) =>
     supabase.from('pricing_master')
-      .select('item_code, barcode, exw_cost, cost_currency, shipping_rate, customs_duty_rate, msrp_primary_ex_vat, msrp_primary_inc_vat, msrp_primary_currency, msrp_secondary_ex_vat, msrp_secondary_inc_vat, msrp_secondary_currency, price_used, msrp_aed, msrp_sar, msrp_qat, real_msrp_aed, real_msrp_sar, real_msrp_qat, uae_overridden, ksa_overridden, qat_overridden, cost_source, price_source')
+      .select('item_code, barcode, exw_cost, cost_currency, target_margin_pct, shipping_rate, customs_duty_rate, msrp_primary_ex_vat, msrp_primary_inc_vat, msrp_primary_currency, msrp_secondary_ex_vat, msrp_secondary_inc_vat, msrp_secondary_currency, price_used, msrp_aed, msrp_sar, msrp_qat, real_msrp_aed, real_msrp_sar, real_msrp_qat, uae_overridden, ksa_overridden, qat_overridden, cost_source, price_source')
       .eq('brand_code', code)
       .order('item_code')
       .range(from, to)
