@@ -16,3 +16,7 @@ build/
 .DS_Store
 *.log
 npm-debug.log*
+
+# Database migrations are run by hand in the Supabase SQL editor and never
+# kept in git: they carry the team roster and schema details.
+supabase/migrations/

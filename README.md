@@ -128,7 +128,7 @@ src/
 ├── pages/           # Home, Login, Apps (workspace overview)
 └── styles/          # global.css
 scripts/             # cross-platform demo build/start wrappers
-supabase/            # config, edge function (erp-proxy), migrations
+supabase/            # config, edge function (erp-proxy); migrations stay local, not in git
 docs/                # documentation
 ```
 
