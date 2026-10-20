@@ -35,26 +35,18 @@ export const supabase = DEMO
   ? makeDemoClient()
   : createClient(supabaseUrl, supabaseAnonKey);
 
-// ── ROLE ALLOWLIST ────────────────────────────────────────────
-// Real user emails are kept out of source control — supplied at build
-// time via REACT_APP_ADMIN_EMAILS / REACT_APP_VIEWER_EMAILS (see
-// .env.example). The demo build forces these empty, so the demo bundle
-// only ever contains the demo identity. Note: this is a UI/UX gate;
-// actual data access is enforced by Supabase RLS.
-const parseList = (v) => (v || '').split(',').map(s => s.trim()).filter(Boolean);
-
-const ROLES = {
-  'demo@castillo.lab': 'admin',
-  ...Object.fromEntries(parseList(process.env.REACT_APP_ADMIN_EMAILS).map(e => [e, 'admin'])),
-  ...Object.fromEntries(parseList(process.env.REACT_APP_VIEWER_EMAILS).map(e => [e, 'viewer'])),
-};
-
-export const ALLOWED_EMAILS = Object.keys(ROLES);
-
-export function isAllowed(email) {
-  return !!ROLES[email];
-}
-
-export function getRole(email) {
-  return ROLES[email] ?? 'viewer';
+// ── ACCESS ────────────────────────────────────────────────────
+// Who may use the app, and as what, is the app_users roster in the database —
+// the same one RLS enforces on every table. Asked of the database after
+// sign-in, so no list of team emails is ever shipped in the app's code.
+//
+// @returns 'admin' | 'viewer' | null (not on the roster). Throws if the
+//          database can't be reached, so a network failure is never read as
+//          "not authorised".
+export async function fetchAppRole() {
+  if (DEMO) return 'admin';
+  const [onRoster, admin] = await Promise.all([supabase.rpc('is_app_user'), supabase.rpc('is_app_admin')]);
+  if (onRoster.error || admin.error) throw onRoster.error || admin.error;
+  if (!onRoster.data) return null;
+  return admin.data ? 'admin' : 'viewer';
 }

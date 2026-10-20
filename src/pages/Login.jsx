@@ -4,7 +4,7 @@ import { Navigate, Link } from 'react-router-dom';
 import { DEMO } from '../demo/demoConfig';
 
 export default function Login() {
-  const { user, loading, denied, signInWithGoogle } = useAuth();
+  const { user, loading, denied, authError, signInWithGoogle } = useAuth();
 
   if (loading) return null;
   if (user) return <Navigate to="/apps" replace />;
@@ -85,6 +85,16 @@ export default function Login() {
             style={{ marginTop: 16, padding: '10px 14px', background: 'rgba(242,100,100,0.08)', border: '1px solid rgba(242,100,100,0.2)', borderRadius: 'var(--radius-md)', fontSize: 12, color: 'var(--accent-red)', lineHeight: 1.5, textAlign: 'left' }}
           >
             This account is not authorised for this workspace. Contact your administrator to request access.
+          </motion.div>
+        )}
+
+        {authError && !denied && (
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            style={{ marginTop: 16, padding: '10px 14px', background: 'rgba(245,166,35,0.08)', border: '1px solid rgba(245,166,35,0.25)', borderRadius: 'var(--radius-md)', fontSize: 12, color: '#f5a623', lineHeight: 1.5, textAlign: 'left' }}
+          >
+            {authError}
           </motion.div>
         )}
 
