@@ -17,7 +17,7 @@ const MODULES = {
   'cost-lookup':   { label: 'Cost Lookup',    description: 'Paste a list of item codes and get their EXW costs back.' },
   'global-markup': { label: 'Global Markup',  description: 'Apply and export portfolio-wide markup adjustments.' },
   'rounding':      { label: 'Price Rounding', description: 'Move stored prices onto the current rounding rule, with a preview and one-step rollback.' },
-  'purchase-order': { label: 'Purchase Order', description: 'Paste item codes and quantities to get a PO items file ready to upload to the ERP.' },
+  'purchase-order': { label: 'Purchase Order', description: "Build a PO from the ERP's open purchase requests or from pasted item codes, and download the items file to upload to the ERP." },
 };
 
 export default function OthersMaster() {
@@ -86,7 +86,7 @@ export default function OthersMaster() {
           )}
           {tab === 'purchase-order' && (
             <motion.div key="po" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
-              <PurchaseOrder />
+              <PurchaseOrder creds={erpCreds} setCreds={setErpCreds} />
             </motion.div>
           )}
           {tab === 'rounding' && (

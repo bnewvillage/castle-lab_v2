@@ -31,8 +31,34 @@ const corsFor = (req: Request) => {
   };
 };
 
-// The caller's email from the JWT payload. Verifying the signature is
-// Supabase's job (verify_jwt); we only read the claim it already validated.
+// The caller's place on the app_users roster, asked of the database WITH the
+// caller's own token. The database checks the token's signature, so a forged
+// token is refused here whether or not the function's verify_jwt setting is
+// on — and that setting does not work with Supabase's newer publishable keys,
+// so it cannot be relied on. Fails closed: anything but a clear yes is no.
+const SUPABASE_URL = (Deno.env.get('SUPABASE_URL') ?? '').replace(/\/+$/, '');
+
+async function rosterRole(req: Request): Promise<'admin' | 'viewer' | null> {
+  const auth   = req.headers.get('authorization') ?? '';
+  const apikey = req.headers.get('apikey') ?? Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+  if (!SUPABASE_URL || !/^Bearer .+/i.test(auth) || !apikey) return null;
+  const ask = async (fn: string) => {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+        method:  'POST',
+        headers: { 'apikey': apikey, 'Authorization': auth, 'Content-Type': 'application/json' },
+        body:    '{}',
+        signal:  AbortSignal.timeout(10_000),
+      });
+      return res.ok ? (await res.json()) === true : false;
+    } catch { return false; }
+  };
+  const [onRoster, admin] = await Promise.all([ask('is_app_user'), ask('is_app_admin')]);
+  return onRoster ? (admin ? 'admin' : 'viewer') : null;
+}
+
+// The caller's email from the JWT payload, for the ERP_ALLOWED_EMAILS list.
+// Only read after rosterRole() has had the database verify the token.
 function callerEmail(req: Request): string | null {
   const raw = (req.headers.get('authorization') ?? '').replace(/^Bearer /i, '');
   const part = raw.split('.')[1];
@@ -111,6 +137,118 @@ async function fetchItemPage(
   throw lastErr instanceof Error ? lastErr : new Error('ERP item fetch failed');
 }
 
+// ── Open purchase requests ──────────────────────────────────────────────────
+// Ported from runwayIQ's pipeline/erp_material_requests.py. A request is open
+// when it is submitted, of type Purchase, and Pending or Partially Ordered;
+// a LINE is open while it still has quantity not on a submitted PO.
+// ordered_qty is kept in stock UOM, so the outstanding amount is
+// stock_qty - ordered_qty, converted back to the line's UOM.
+const OPEN_REQUEST_STATUSES = ['Pending', 'Partially Ordered'];
+
+async function erpList(
+  cookie: string, doctype: string, fields: string[], filters: unknown[], parent?: string,
+): Promise<Record<string, unknown>[]> {
+  const params = new URLSearchParams({
+    fields:            JSON.stringify(fields),
+    filters:           JSON.stringify(filters),
+    limit_page_length: '0',            // every match; callers keep `filters` narrow
+  });
+  // Child tables 403 unless the parent doctype is named: permission is
+  // checked through the parent.
+  if (parent) params.set('parent', parent);
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const res = await fetch(`${ERP_BASE}/api/resource/${encodeURIComponent(doctype)}?${params}`, {
+        headers: { 'Accept': 'application/json', 'Cookie': cookie },
+        signal:  AbortSignal.timeout(REQ_TIMEOUT * 2),
+      });
+      if (!res.ok) {
+        console.error(`${doctype} list error ${res.status}:`, (await res.text()).slice(0, 500));
+        throw new Error(`ERP ${doctype} list error (${res.status})`);
+      }
+      const body = await res.json() as { data?: Record<string, unknown>[] };
+      return Array.isArray(body.data) ? body.data : [];
+    } catch (err) {
+      lastErr = err;
+      if (attempt < MAX_RETRIES - 1) await sleep(RETRY_WAIT);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(`ERP ${doctype} fetch failed`);
+}
+
+const chunks = <T,>(xs: T[], n: number) =>
+  Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
+const numOf = (v: unknown) => (typeof v === 'number' ? v : Number(v ?? 0)) || 0;
+
+async function openPurchaseRequests(cookie: string) {
+  const headers = await erpList(cookie, 'Material Request',
+    ['name', 'transaction_date', 'schedule_date', 'status', 'company', 'owner'],
+    [['docstatus', '=', 1], ['material_request_type', '=', 'Purchase'], ['status', 'in', OPEN_REQUEST_STATUSES]]);
+  if (!headers.length) return [];
+  const byName = new Map(headers.map(h => [h.name as string, h]));
+
+  // Every column of the line: naming fields one by one would make a single
+  // field this ERP lacks fail the whole call.
+  const items: Record<string, unknown>[] = [];
+  for (const part of chunks([...byName.keys()], 40)) {
+    items.push(...await erpList(cookie, 'Material Request Item', ['*'],
+      [['parent', 'in', part]], 'Material Request'));
+  }
+
+  const open = items.map(it => {
+    const h = byName.get(it.parent as string)!;
+    const cf = numOf(it.conversion_factor) || 1;
+    const stockQty = numOf(it.stock_qty) || numOf(it.qty) * cf;
+    const outstandingStock = stockQty - numOf(it.ordered_qty);
+    return {
+      line_id:           it.name,
+      request_id:        it.parent,
+      idx:               it.idx,
+      company:           h.company,
+      request_status:    h.status,
+      transaction_date:  h.transaction_date,
+      owner:             h.owner,
+      item_code:         it.item_code,
+      item_name:         it.item_name,
+      description:       it.description,
+      brand:             it.brand ?? null,
+      item_group:        it.item_group ?? null,
+      qty:               numOf(it.qty),
+      ordered_qty:       numOf(it.ordered_qty),
+      outstanding_qty:   Math.round((outstandingStock / cf) * 1e6) / 1e6,
+      uom:               it.uom,
+      stock_uom:         it.stock_uom,
+      conversion_factor: cf,
+      schedule_date:     it.schedule_date || h.schedule_date,
+      warehouse:         it.warehouse ?? null,
+      sales_order:       it.sales_order ?? null,
+      sales_order_item:  it.sales_order_item ?? null,
+      expense_account:   it.expense_account ?? null,
+      cost_center:       it.cost_center ?? null,
+      project:           it.project ?? null,
+      draft_pos:         [] as string[],
+    };
+  }).filter(l => l.outstanding_qty > 1e-9);
+
+  // The ERP only counts a request as ordered when the PO is SUBMITTED, so a
+  // line already on someone's draft PO still looks open. Name those drafts.
+  const byLine = new Map(open.map(l => [l.line_id as string, l]));
+  for (const part of chunks([...byLine.keys()], 60)) {
+    const onDrafts = await erpList(cookie, 'Purchase Order Item', ['parent', 'material_request_item'],
+      [['material_request_item', 'in', part], ['docstatus', '=', 0]], 'Purchase Order');
+    for (const d of onDrafts) {
+      const l = byLine.get(d.material_request_item as string);
+      if (l && !l.draft_pos.includes(d.parent as string)) l.draft_pos.push(d.parent as string);
+    }
+  }
+
+  return open.sort((a, b) =>
+    String(a.schedule_date).localeCompare(String(b.schedule_date))
+    || String(a.request_id).localeCompare(String(b.request_id))
+    || numOf(a.idx) - numOf(b.idx));
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsFor(req) });
@@ -119,7 +257,10 @@ Deno.serve(async (req) => {
   try {
     if (!ERP_BASE) return json({ error: 'ERP_BASE not configured' }, 500, req);
 
+    // A verified token on the app_users roster, first; then the ERP allowlist.
     // An unconfigured allowlist fails closed rather than open.
+    const role = await rosterRole(req);
+    if (!role) return json({ error: 'Not authorised' }, 403, req);
     const caller = callerEmail(req);
     if (ALLOWED_EMAILS.size === 0) return json({ error: 'Proxy not configured for any caller' }, 503, req);
     if (!caller || !ALLOWED_EMAILS.has(caller)) return json({ error: 'Not authorised' }, 403, req);
@@ -136,6 +277,8 @@ Deno.serve(async (req) => {
     const { email, password, action, report_name } = body;
 
     if (!email || !password) return json({ error: 'email and password required' }, 400, req);
+    // Building POs is for admins — enforced here, not only in the screen.
+    if (action === 'purchase_requests' && role !== 'admin') return json({ error: 'Admins only' }, 403, req);
 
     const sessionCookie = await erpLogin(email, password);
 
@@ -158,6 +301,11 @@ Deno.serve(async (req) => {
       }
 
       return json({ items, nextStart: cursor, done }, 200, req);
+    }
+
+    // ── action: 'purchase_requests' — open purchase-request lines ────
+    if (action === 'purchase_requests') {
+      return json({ lines: await openPurchaseRequests(sessionCookie) }, 200, req);
     }
 
     // ── default: fetch a named report ────────────────────────────

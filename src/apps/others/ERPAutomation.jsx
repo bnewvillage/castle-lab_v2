@@ -7,13 +7,11 @@ import {
   saveErpSyncCursor, getErpMaxModified,
 } from '../../lib/db';
 import { downloadXLSX } from '../../lib/xlsxExport';
-import { supabase } from '../../lib/supabase';
+import { callErpProxy as callProxy } from '../../lib/erpProxy';
+import ErpConnection from './ErpConnection';
 import { DEMO } from '../../demo/demoConfig';
 import { demoErpReport } from '../../demo/demoErp';
 
-const PROXY_URL    = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/erp-proxy`;
-const ERP_EMAIL_PH = 'you@company.example';
-const ERP_HOST     = 'erp.company.example';
 
 const STOCK_NO_PRICE_REPORT = 'Item In Stock Without Price';
 // The report's own column naming isn't known up front, so the item code column
@@ -25,22 +23,6 @@ const PRICE_REPORTS = [
   { key: 'sar', name: 'PRICE-SAR_ValidFromLatest', dbField: 'msrp_sar', currency: 'SAR' },
   { key: 'qar', name: 'PRICE-QAR_ValidFromLatest', dbField: 'msrp_qat', currency: 'QAR' },
 ];
-
-async function callProxy(email, password, body) {
-  const { data: { session } } = await supabase.auth.getSession();
-  const res = await fetch(PROXY_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type':  'application/json',
-      'Authorization': `Bearer ${session?.access_token}`,
-      'apikey':        process.env.REACT_APP_SUPABASE_ANON_KEY,
-    },
-    body: JSON.stringify({ email, password, ...body }),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json?.error || `Proxy error (${res.status})`);
-  return json;
-}
 
 async function fetchReport(email, password, report_name) {
   if (DEMO) return demoErpReport(report_name);
@@ -196,8 +178,6 @@ function RunBtn({ label, loading, disabled, onClick }) {
 // the page container so it carries from one ERP page to the other.
 export default function ERPAutomation({ view, creds, setCreds }) {
   const { email, password } = creds;
-  const setEmail    = (v) => setCreds(c => ({ ...c, email: v }));
-  const setPassword = (v) => setCreds(c => ({ ...c, password: v }));
   const isConnected = !!(email.trim() && password.trim());
 
   // ── Section 3b: Stock Without Price ──────────────────────────
@@ -474,33 +454,7 @@ export default function ERPAutomation({ view, creds, setCreds }) {
   return (
     <div style={{ maxWidth: 760, paddingBottom: 60 }}>
 
-      {/* ── Connection ──────────────────────────────────────────── */}
-      <div style={groupBox(false)}>
-        <div style={{ ...groupHead, marginBottom: 16 }}>ERP Connection</div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-          <div style={{ flex: 1.2 }}>
-            <label style={lbl}>ERP Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              placeholder={ERP_EMAIL_PH}
-              style={{ ...inp(!!email, false), width: '100%' }}
-            />
-          </div>
-          <div style={{ flex: 1 }}>
-            <label style={lbl}>ERP Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="Enter your ERP password"
-              style={{ ...inp(!!password, false), width: '100%' }}
-            />
-          </div>
-        </div>
-        <div style={{ marginTop: 10, fontSize: 11, color: t.t4, fontFamily: 'var(--font-mono)' }}>{ERP_HOST}</div>
-      </div>
+      <ErpConnection creds={creds} setCreds={setCreds} />
 
       {view === 'checks' && (<>
       {/* ── ERP Item Cache ───────────────────────────────────────── */}

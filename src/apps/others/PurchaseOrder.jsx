@@ -1,8 +1,11 @@
 import { useState } from 'react';
 import { t, btnW, btnG, btnSm, lbl, groupBox, groupHead } from '../pricing/styles';
+import { useAuth } from '../../lib/AuthContext';
 import { fetchItemsByCodes } from '../../lib/db';
 import { downloadText } from '../../lib/csvExport';
-import { parsePoInput, buildPoLines, mergeDuplicates, poCsv, erpDate, addDays } from '../../lib/purchaseOrder';
+import { parsePoInput, buildPoLines, mergeDuplicates, poCsv } from '../../lib/purchaseOrder';
+import { Pill, DefaultDelivery, LineDelivery, todayIso, money } from './po/shared';
+import FromRequests from './po/FromRequests';
 
 const box = {
   width: '100%', minHeight: 300, resize: 'vertical',
@@ -12,30 +15,7 @@ const box = {
   outline: 'none', boxSizing: 'border-box', whiteSpace: 'pre',
 };
 
-const dateInput = {
-  background: t.bg1, border: `1px solid ${t.b2}`, borderRadius: 6, color: t.t1,
-  fontSize: 12.5, fontFamily: 'var(--font-mono)', padding: '5px 8px', colorScheme: 'dark',
-};
-
-const pad = (n) => String(n).padStart(2, '0');
-const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const lineCount = (raw) => raw.replace(/\r/g, '').split('\n').filter(s => s.trim()).length;
-const money = (v) => v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-const WEEKS = [2, 4, 6, 8, 12];
-
-function Pill({ label, value, color }) {
-  return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-      background: t.bg3, border: `1px solid ${t.b2}`, borderRadius: 10,
-      padding: '10px 18px', minWidth: 84,
-    }}>
-      <span style={{ fontSize: 18, fontWeight: 500, color: color || t.t1, fontFamily: 'var(--font-mono)' }}>{value}</span>
-      <span style={{ fontSize: 10, color: t.t4, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>{label}</span>
-    </div>
-  );
-}
 
 function PasteColumn({ label, hint, value, onChange, placeholder, flex = 1 }) {
   const n = lineCount(value);
@@ -49,7 +29,7 @@ function PasteColumn({ label, hint, value, onChange, placeholder, flex = 1 }) {
   );
 }
 
-export default function PurchaseOrder() {
+function PastePO() {
   const [codes, setCodes] = useState('');
   const [qtys,  setQtys]  = useState('');
   const [dates, setDates] = useState('');
@@ -113,7 +93,7 @@ export default function PurchaseOrder() {
   const td = { padding: '7px 10px', fontSize: 12.5, fontFamily: 'var(--font-mono)', borderTop: `1px solid ${t.b1}`, color: t.t2, verticalAlign: 'middle' };
 
   return (
-    <div style={{ paddingBottom: 60, display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
       {/* ── Paste ─────────────────────────────────────────────── */}
       <div style={groupBox(false)}>
@@ -138,19 +118,8 @@ export default function PurchaseOrder() {
           <PasteColumn label="Expected delivery" hint="(optional)" value={dates} onChange={setDates} placeholder={'17-11-2026\n\n01-12-2026'} />
         </div>
 
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 16, paddingTop: 16, borderTop: `1px solid ${t.b1}` }}>
-          <span style={{ ...lbl, marginBottom: 0 }}>Default expected delivery</span>
-          <input type="date" value={defaultDate} onChange={e => setDefaultDate(e.target.value)} style={dateInput} />
-          {WEEKS.map(w => {
-            const v = addDays(todayIso(), w * 7);
-            const on = defaultDate === v;
-            return (
-              <button key={w} onClick={() => setDefaultDate(v)} title={erpDate(v)}
-                style={{ ...btnG, ...btnSm, color: on ? t.t1 : t.t3, borderColor: on ? t.b3 : t.b2 }}>+{w} wk</button>
-            );
-          })}
-          {defaultDate && <span style={{ fontSize: 12, color: t.t3, fontFamily: 'var(--font-mono)' }}>{erpDate(defaultDate)}</span>}
-        </div>
+        <DefaultDelivery value={defaultDate} onChange={setDefaultDate}
+          style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${t.b1}` }} />
 
         {err && (
           <div style={{ marginTop: 12, background: 'rgba(242,100,100,0.08)', border: '1px solid rgba(242,100,100,0.3)', borderRadius: 8, padding: '12px 16px', fontSize: 13, color: t.red }}>{err}</div>
@@ -224,12 +193,8 @@ export default function PurchaseOrder() {
                       <td style={{ ...td, textAlign: 'right' }}>{r.amount != null ? money(r.amount) : '—'}</td>
                       <td style={{ ...td, whiteSpace: 'nowrap' }}>
                         {!out && (
-                          <>
-                            <input type="date" value={effective} onChange={e => setLineDate(i, e.target.value)}
-                              style={{ ...dateInput, color: r.date ? t.t1 : t.t3 }} title={r.date ? 'Set on this line' : 'The default'} />
-                            <button onClick={() => fillDown(i)} disabled={!effective} title="Copy this date to every line below"
-                              style={{ ...btnG, ...btnSm, marginLeft: 6, padding: '4px 9px', opacity: effective ? 1 : 0.35, cursor: effective ? 'pointer' : 'not-allowed' }}>↓ fill</button>
-                          </>
+                          <LineDelivery value={effective} isOwn={!!r.date}
+                            onChange={v => setLineDate(i, v)} onFillDown={() => fillDown(i)} />
                         )}
                       </td>
                       <td style={{ ...td, fontFamily: 'var(--font-sans)', fontSize: 12, whiteSpace: 'nowrap', color: out ? t.red : r.warnings.length ? t.amber : t.green }}>
@@ -248,6 +213,35 @@ export default function PurchaseOrder() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Two ways to start a PO: pick from the ERP's open purchase requests, or paste
+// item codes and quantities. Both stay mounted, so switching keeps your work.
+const MODES = [
+  { k: 'requests', label: 'From purchase requests' },
+  { k: 'paste',    label: 'Paste lines' },
+];
+
+export default function PurchaseOrder({ creds, setCreds }) {
+  const { isViewer } = useAuth();
+  const [mode, setMode] = useState(isViewer ? 'paste' : 'requests');
+  return (
+    <div style={{ paddingBottom: 60 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        {MODES.map(({ k, label }) => (
+          <button key={k} onClick={() => setMode(k)}
+            style={{ ...btnG, ...btnSm, padding: '8px 16px',
+              background:  mode === k ? 'rgba(77,159,255,0.09)' : 'transparent',
+              borderColor: mode === k ? 'rgba(77,159,255,0.3)' : t.b2,
+              color:       mode === k ? t.blue : t.t3 }}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div style={{ display: mode === 'requests' ? 'block' : 'none' }}><FromRequests creds={creds} setCreds={setCreds} /></div>
+      <div style={{ display: mode === 'paste' ? 'block' : 'none' }}><PastePO /></div>
     </div>
   );
 }
