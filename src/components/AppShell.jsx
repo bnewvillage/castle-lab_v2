@@ -1,43 +1,11 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
-import {
-  IconGrid, IconTag, IconUpload, IconList, IconBookmark, IconFolder, IconRefresh,
-  IconHistory, IconFileExport, IconPercent, IconLogout,
-} from './icons';
-
-const NAV = [
-  {
-    group: 'Workspace',
-    items: [
-      { label: 'Overview', icon: IconGrid, path: '/apps', exact: true },
-    ],
-  },
-  {
-    group: 'Pricing',
-    items: [
-      { label: 'Single SKU',    icon: IconTag,      path: '/apps/pricing-master/single' },
-      { label: 'Bulk Import',   icon: IconUpload,   path: '/apps/pricing-master/bulk' },
-      { label: 'Item List',     icon: IconList,     path: '/apps/pricing-master/list' },
-      { label: 'Brands',        icon: IconBookmark, path: '/apps/pricing-master/brands' },
-      { label: 'Project Items', icon: IconFolder,   path: '/apps/pricing-master/project' },
-      { label: 'Rollback',      icon: IconHistory,  path: '/apps/pricing-master/rollback' },
-    ],
-  },
-  {
-    group: 'Automations',
-    items: [
-      { label: 'ERP Automation',   icon: IconFileExport, path: '/apps/others/erp-export' },
-      { label: 'Global Markup',    icon: IconPercent,    path: '/apps/others/global-markup' },
-      { label: 'Price Rounding',   icon: IconRefresh,    path: '/apps/others/rounding' },
-    ],
-  },
-];
+import { IconLogout } from './icons';
+import { NAV } from './navConfig';
 
 function NavItem({ item }) {
   const location = useLocation();
-  const active = item.exact
-    ? location.pathname === item.path
-    : location.pathname === item.path;
+  const active = location.pathname === item.path;
   const Icon = item.icon;
 
   return (

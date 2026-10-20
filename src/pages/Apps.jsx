@@ -1,39 +1,12 @@
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
-import {
-  IconTag, IconUpload, IconList, IconBookmark, IconFolder, IconHistory,
-  IconFileExport, IconPercent, IconArrowRight, IconLayers, IconZap,
-} from '../components/icons';
+import { IconArrowRight } from '../components/icons';
+import { NAV } from '../components/navConfig';
 
-const SUITES = [
-  {
-    id: 'pricing',
-    name: 'Pricing Master',
-    icon: IconLayers,
-    accent: '#4d9fff',
-    description: 'Multi-currency landed cost modelling, margin control and market pricing across UAE, KSA and Qatar.',
-    modules: [
-      { label: 'Single SKU',    icon: IconTag,      path: '/apps/pricing-master/single' },
-      { label: 'Bulk Import',   icon: IconUpload,   path: '/apps/pricing-master/bulk' },
-      { label: 'Item List',     icon: IconList,     path: '/apps/pricing-master/list' },
-      { label: 'Brands',        icon: IconBookmark, path: '/apps/pricing-master/brands' },
-      { label: 'Project Items', icon: IconFolder,   path: '/apps/pricing-master/project' },
-      { label: 'Rollback',      icon: IconHistory,  path: '/apps/pricing-master/rollback' },
-    ],
-  },
-  {
-    id: 'automations',
-    name: 'Automations',
-    icon: IconZap,
-    accent: '#3ecf8e',
-    description: 'Scheduled and on-demand data operations — ERP synchronisation and portfolio-wide exports.',
-    modules: [
-      { label: 'ERP Price Export', icon: IconFileExport, path: '/apps/others/erp-export' },
-      { label: 'Global Markup',    icon: IconPercent,    path: '/apps/others/global-markup' },
-    ],
-  },
-];
+const SUITES = NAV.filter(g => g.description).map(g => ({
+  id: g.group, name: g.group, icon: g.icon, accent: g.accent, description: g.description, modules: g.items,
+}));
 
 const fadeUp = (delay = 0) => ({
   initial: { opacity: 0, y: 16 },

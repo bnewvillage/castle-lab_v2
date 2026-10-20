@@ -3,22 +3,29 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useParams } from 'react-router-dom';
 import { t } from './pricing/styles';
 import { IconDownload } from '../components/icons';
+import { groupOf } from '../components/navConfig';
+import { DEMO } from '../demo/demoConfig';
 import ERPAutomation from './others/ERPAutomation';
 import CostLookup from './others/CostLookup';
 import GlobalMarkupExport from './others/GlobalMarkupExport';
 import PriceRounding from './others/PriceRounding';
+import PurchaseOrder from './others/PurchaseOrder';
 
 const MODULES = {
-  'erp-export':    { label: 'ERP Automation', description: 'Price export, item coverage check, and combined price match report.' },
+  'erp-export':    { label: 'Price Lists',      description: 'Upload-ready price list files for the ERP, and prices for stock the ERP holds without one.' },
+  'erp-checks':    { label: 'Catalogue Checks', description: 'The catalogue against the ERP: items missing on either side, and items no price list covers.' },
   'cost-lookup':   { label: 'Cost Lookup',    description: 'Paste a list of item codes and get their EXW costs back.' },
   'global-markup': { label: 'Global Markup',  description: 'Apply and export portfolio-wide markup adjustments.' },
   'rounding':      { label: 'Price Rounding', description: 'Move stored prices onto the current rounding rule, with a preview and one-step rollback.' },
+  'purchase-order': { label: 'Purchase Order', description: 'Paste item codes and quantities to get a PO items file ready to upload to the ERP.' },
 };
 
 export default function OthersMaster() {
   const { tab: tabParam } = useParams();
   const tab = MODULES[tabParam] ? tabParam : 'erp-export';
   const [exportActions, setExportActions] = useState([]);
+  // The ERP login, kept here so it carries between the ERP pages. Never stored.
+  const [erpCreds, setErpCreds] = useState(DEMO ? { email: 'demo@castillo.lab', password: 'demo-access' } : { email: '', password: '' });
 
   useEffect(() => { setExportActions([]); }, [tab]);
 
@@ -32,7 +39,7 @@ export default function OthersMaster() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap', padding: '30px 0 20px', borderBottom: `1px solid ${t.b1}`, marginBottom: 26 }}>
           <div>
             <p style={{ fontSize: 11, color: t.t4, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 7 }}>
-              Automations
+              {groupOf(`/apps/others/${tab}`)}
             </p>
             <h1 style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.02em', color: t.t1, lineHeight: 1.2, marginBottom: 5 }}>{mod.label}</h1>
             <p style={{ fontSize: 13, color: t.t3, maxWidth: 560 }}>{mod.description}</p>
@@ -59,7 +66,12 @@ export default function OthersMaster() {
         <AnimatePresence mode="wait">
           {tab === 'erp-export' && (
             <motion.div key="erp" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
-              <ERPAutomation />
+              <ERPAutomation view="prices" creds={erpCreds} setCreds={setErpCreds} />
+            </motion.div>
+          )}
+          {tab === 'erp-checks' && (
+            <motion.div key="erpc" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
+              <ERPAutomation view="checks" creds={erpCreds} setCreds={setErpCreds} />
             </motion.div>
           )}
           {tab === 'cost-lookup' && (
@@ -70,6 +82,11 @@ export default function OthersMaster() {
           {tab === 'global-markup' && (
             <motion.div key="gm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
               <GlobalMarkupExport setExportActions={setExportActions} />
+            </motion.div>
+          )}
+          {tab === 'purchase-order' && (
+            <motion.div key="po" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
+              <PurchaseOrder />
             </motion.div>
           )}
           {tab === 'rounding' && (

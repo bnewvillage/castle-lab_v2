@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { useParams, useNavigate } from 'react-router-dom';
+import { groupOf } from '../components/navConfig';
 import { fetchRates, fetchBrands } from '../lib/db';
 import { t } from './pricing/styles';
 import { IconRefresh, IconMaximize, IconMinimize, IconDownload } from '../components/icons';
@@ -11,10 +12,12 @@ import ItemList     from './pricing/ItemList';
 import Brands       from './pricing/Brands';
 import Rollback     from './pricing/Rollback';
 import ProjectItems from './pricing/ProjectItems';
+import BulkEdit     from './pricing/BulkEdit';
 
 const MODULES = {
   single:   { label: 'Single SKU',    description: 'Create and edit items with live margin calculations across UAE, KSA and Qatar.' },
-  bulk:     { label: 'Bulk Import',   description: 'Import items from Excel with validation, duplicate handling and change previews.' },
+  bulk:     { label: 'Bulk Import',   description: 'Create or update items from Excel or pasted columns, with validation and change previews.' },
+  edit:     { label: 'Bulk Edit',     description: 'Override prices, rename codes or delete items by pasted item code.' },
   list:     { label: 'Item List',     description: 'Browse, filter and export the pricing master with computed margins.' },
   brands:   { label: 'Brands',        description: 'Brand markup rules and portfolio analytics.' },
   project:  { label: 'Project Items', description: 'Cost-driven pricing for project quotations.' },
@@ -96,7 +99,7 @@ export default function PricingMaster() {
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-end', gap:16, flexWrap:'wrap', padding:'30px 0 20px', borderBottom:`1px solid ${t.b1}`, marginBottom:26 }}>
           <div>
             <p style={{ fontSize:11, color:t.t4, fontFamily:'var(--font-mono)', textTransform:'uppercase', letterSpacing:'0.1em', marginBottom:7 }}>
-              Pricing
+              {groupOf(`/apps/pricing-master/${tab}`)}
             </p>
             <h1 style={{ fontSize:22, fontWeight:600, letterSpacing:'-0.02em', color:t.t1, lineHeight:1.2, marginBottom:5 }}>{mod.label}</h1>
             <p style={{ fontSize:13, color:t.t3, maxWidth:560 }}>{mod.description}</p>
@@ -138,6 +141,9 @@ export default function PricingMaster() {
           </div>}
           {visited.has('bulk') && <div style={{ display: tab==='bulk' ? 'block' : 'none' }}>
             <BulkUpload onToast={showToast}/>
+          </div>}
+          {visited.has('edit') && <div style={{ display: tab==='edit' ? 'block' : 'none' }}>
+            <BulkEdit onToast={showToast}/>
           </div>}
           {visited.has('list') && <div style={{ display: tab==='list' ? 'block' : 'none' }}>
             <ItemList rates={rates} brands={brands} onEditItem={handleEditItem} maximized={maximized} setExportActions={setExportActions} isActive={tab==='list'} refreshKey={refreshKey} onToast={showToast}/>

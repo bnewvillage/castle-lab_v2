@@ -73,7 +73,7 @@ function daysAgo(n) {
 
 // ── Build one brand's items ───────────────────────────────────
 // Prices an item with the rounding rule in force before Oct 2026, so the demo
-// catalogue has prices for Automations → Price Rounding to move. Same pipeline
+// catalogue has prices for Pricing → Price Rounding to move. Same pipeline
 // and multiplication order as the old pricing code.
 function legacyPrices(uaeShelfTarget, additional) {
   const k = (aed) => pf2(legacyMarketShelf(aed * 1.03 * 1.15) / 1.15);

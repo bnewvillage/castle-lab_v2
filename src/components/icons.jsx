@@ -50,6 +50,32 @@ export const IconHistory = ({ size = 16 }) => (
   </svg>
 );
 
+export const IconEdit = ({ size = 16 }) => (
+  <svg {...base(size)}>
+    <path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>
+  </svg>
+);
+
+export const IconSearch = ({ size = 16 }) => (
+  <svg {...base(size)}>
+    <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
+  </svg>
+);
+
+export const IconCheckList = ({ size = 16 }) => (
+  <svg {...base(size)}>
+    <path d="M3.5 6.5l1.5 1.5 3-3"/><path d="M3.5 13.5l1.5 1.5 3-3"/>
+    <path d="M11 7h9.5"/><path d="M11 14h9.5"/><path d="M11 20h9.5"/>
+  </svg>
+);
+
+export const IconCart = ({ size = 16 }) => (
+  <svg {...base(size)}>
+    <circle cx="9" cy="20" r="1.3"/><circle cx="18" cy="20" r="1.3"/>
+    <path d="M2.5 3.5h2.6l2.3 11.2a1.6 1.6 0 0 0 1.6 1.3h8.6a1.6 1.6 0 0 0 1.6-1.2l1.6-6.8H6.2"/>
+  </svg>
+);
+
 export const IconFileExport = ({ size = 16 }) => (
   <svg {...base(size)}>
     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>

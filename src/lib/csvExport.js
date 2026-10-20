@@ -100,6 +100,12 @@ export async function downloadFullTableXLSX({ table, filters = {}, filename }) {
 
   downloadXLSX(all, filename);
 }
+// Text exactly as given — no BOM, no reformatting. For files another system
+// imports, where every byte of the layout matters.
+export function downloadText(text, filename, type = 'text/csv;charset=utf-8;') {
+  triggerDownload(new Blob([text], { type }), filename);
+}
+
 function triggerDownload(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

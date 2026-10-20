@@ -147,7 +147,7 @@ export default function PriceRounding() {
             {result.applied < result.planned
               ? `${(result.planned - result.applied).toLocaleString()} were skipped because they changed after the preview — preview again to include them. `
               : ''}
-            Undo it from Pricing → Rollback under "Rounding Rule". Run a Price Export afterwards so the ERP gets the new prices.
+            Undo it from Pricing → Rollback under "Rounding Rule". Then run ERP → Price Lists → Price Export so the ERP gets the new prices.
           </div>
         )}
 

@@ -7,8 +7,6 @@ import { t, inp, sel, btnW, btnG, btnSm, lbl, groupBox, groupHead, CURRENCIES } 
 import { useAuth } from '../../lib/AuthContext';
 import BrandSelect from './BrandSelect';
 import BulkUpdatePaste from './BulkUpdatePaste';
-import MassOverride from './MassOverride';
-import BulkCodeOps from './BulkCodeOps';
 import {
   PRICE_USED_OPTIONS, SOURCES, LARGE_THRESHOLD, REVIEW_PAGE_SIZE, MERGE_FIELDS,
   generateTemplate, validateAndCalc, processRows,
@@ -787,26 +785,20 @@ export default function BulkUpload({ onToast }) {
 
       {inputMode === 'paste' ? (
       <>
-        {/* Full writes the whole row; Update patches only the fields fed;
-            Mass Override pins market prices as manual overrides. */}
+        {/* Full writes the whole row; Update patches only the fields fed.
+            Overrides, renames and deletes live in Bulk Edit. */}
         <div style={{ display:'flex', gap:8, marginBottom:16 }}>
-          {[{ k:'full', label:'Full' }, { k:'update', label:'Update' }, { k:'override', label:'Mass Override' }, { k:'rename', label:'Rename codes' }, { k:'delete', label:'Delete items' }].map(({ k, label }) => (
+          {[{ k:'full', label:'Full' }, { k:'update', label:'Update' }].map(({ k, label }) => (
             <button key={k} onClick={()=>{ setPasteMode(k); setError(null); }}
               style={{ ...btnG, ...btnSm, padding:'6px 14px',
                 background: pasteMode===k ? 'rgba(77,159,255,0.09)' : 'transparent',
                 borderColor: pasteMode===k ? 'rgba(77,159,255,0.3)' : t.b2,
-                color: pasteMode===k ? (k === 'delete' ? t.red : t.blue) : t.t3 }}>
-              {(k === 'override' || k === 'rename' || k === 'delete') ? label : `Paste columns: ${label}`}
+                color: pasteMode===k ? t.blue : t.t3 }}>
+              {`Paste columns: ${label}`}
             </button>
           ))}
         </div>
-        {pasteMode === 'delete' ? (
-          <BulkCodeOps mode="delete" onToast={onToast} isViewer={isViewer} />
-        ) : pasteMode === 'rename' ? (
-          <BulkCodeOps mode="rename" onToast={onToast} isViewer={isViewer} />
-        ) : pasteMode === 'override' ? (
-          <MassOverride onToast={onToast} isViewer={isViewer} />
-        ) : pasteMode === 'update' ? (
+        {pasteMode === 'update' ? (
           <BulkUpdatePaste onToast={onToast} isViewer={isViewer} />
         ) : (
         <PastePanel

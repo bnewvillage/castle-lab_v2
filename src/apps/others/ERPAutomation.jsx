@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { t, inp, btnW, btnG, lbl, groupBox, groupHead } from '../pricing/styles';
 import {
   fetchAllItemsForErpAutomation, fetchBrands,
@@ -192,10 +191,13 @@ function RunBtn({ label, loading, disabled, onClick }) {
 }
 
 // ── Root ───────────────────────────────────────────────────────
-export default function ERPAutomation() {
-  const navigate = useNavigate();
-  const [email,    setEmail]    = useState(DEMO ? 'demo@castillo.lab' : '');
-  const [password, setPassword] = useState(DEMO ? 'demo-access'       : '');
+// One component, two pages: 'prices' (files for the ERP's price lists) and
+// 'checks' (the catalogue against the ERP item cache). The ERP login is held by
+// the page container so it carries from one ERP page to the other.
+export default function ERPAutomation({ view, creds, setCreds }) {
+  const { email, password } = creds;
+  const setEmail    = (v) => setCreds(c => ({ ...c, email: v }));
+  const setPassword = (v) => setCreds(c => ({ ...c, password: v }));
   const isConnected = !!(email.trim() && password.trim());
 
   // ── Section 3b: Stock Without Price ──────────────────────────
@@ -500,22 +502,7 @@ export default function ERPAutomation() {
         <div style={{ marginTop: 10, fontSize: 11, color: t.t4, fontFamily: 'var(--font-mono)' }}>{ERP_HOST}</div>
       </div>
 
-      {/* ── Cost Lookup ──────────────────────────────────────────── */}
-      <div style={{ ...groupBox(false), marginTop: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div>
-            <div style={{ ...groupHead, marginBottom: 4 }}>Cost Lookup</div>
-            <div style={{ fontSize: 12, color: t.t4 }}>
-              Paste a list of item codes and get their EXW costs back.
-            </div>
-          </div>
-          <button
-            onClick={() => navigate('/apps/others/cost-lookup')}
-            style={{ ...btnG, marginLeft: 16, flexShrink: 0 }}
-          >Open →</button>
-        </div>
-      </div>
-
+      {view === 'checks' && (<>
       {/* ── ERP Item Cache ───────────────────────────────────────── */}
       <div style={{ ...groupBox(false), marginTop: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -550,7 +537,9 @@ export default function ERPAutomation() {
         <LogBox lines={syncLog} progress={syncProgress} />
         <ErrBox msg={syncErr} />
       </div>
+      </>)}
 
+      {view === 'prices' && (<>
       {/* ── Section 1: Price Export ──────────────────────────────── */}
       <div style={{ ...groupBox(false), marginTop: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -597,7 +586,9 @@ export default function ERPAutomation() {
           </div>
         )}
       </div>
+      </>)}
 
+      {view === 'checks' && (<>
       {/* ── Section 2: Item Coverage ─────────────────────────────── */}
       <div style={{ ...groupBox(false), marginTop: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -648,7 +639,9 @@ export default function ERPAutomation() {
           </div>
         )}
       </div>
+      </>)}
 
+      {view === 'prices' && (<>
       {/* ── Section 3: Stock Without Price ───────────────────────── */}
       <div style={{ ...groupBox(false), marginTop: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -684,7 +677,9 @@ export default function ERPAutomation() {
           </div>
         )}
       </div>
+      </>)}
 
+      {view === 'checks' && (<>
       {/* ── Section 4: Price Match ───────────────────────────────── */}
       <div style={{ ...groupBox(false), marginTop: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -712,6 +707,7 @@ export default function ERPAutomation() {
           </div>
         )}
       </div>
+      </>)}
 
     </div>
   );
