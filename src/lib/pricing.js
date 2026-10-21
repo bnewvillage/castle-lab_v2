@@ -182,10 +182,16 @@ export function suggestUAEPrice(priceUsedValue, priceCurrency, markupPercentage,
   return target == null ? null : prettifyShelf(target) / 1.05;
 }
 
-// KSA: UAE ex-VAT × 1.03 market premium × 1.15 VAT, rounded on shelf, stored ex-VAT.
+// KSA: the UAE price ex-VAT converted to SAR — no market premium. 1 AED is
+// 1.0211 SAR (both pegged to the dollar, 3.6725 and 3.75), taken as 1.02.
+// Changed from 1.03 on 2026-10-21; Price Rounding → Recalculate KSA moves
+// stored prices onto it.
+export const KSA_FACTOR = 1.02;
+
+// KSA: UAE ex-VAT × KSA_FACTOR × 1.15 VAT, rounded on shelf, stored ex-VAT.
 export function suggestKSAPrice(msrp_aed) {
   if (msrp_aed == null) return null;
-  return prettifyShelf(msrp_aed * 1.03 * 1.15) / 1.15;
+  return prettifyShelf(msrp_aed * KSA_FACTOR * 1.15) / 1.15;
 }
 
 // Qatar: UAE ex-VAT × 1.01 market premium. No VAT, so shelf and stored agree.

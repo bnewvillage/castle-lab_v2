@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { saveProjectItem } from '../../lib/db';
-import { calcProjectPrice, formatMargin, MARGIN_COLORS, suggestKSAPrice, suggestQATPrice, DEFAULT_PROJECT_MARGIN_PCT } from '../../lib/pricing';
+import { calcProjectPrice, formatMargin, MARGIN_COLORS, suggestKSAPrice, suggestQATPrice, DEFAULT_PROJECT_MARGIN_PCT, KSA_FACTOR } from '../../lib/pricing';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead } from './styles';
 import { toNum, hasNum, round, money } from '../../lib/num';
 import { useAuth } from '../../lib/AuthContext';
@@ -522,7 +522,7 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
                   onClick={() => set('ksa_overridden', !form.ksa_overridden)}
                 >{form.ksa_overridden ? 'Revert' : 'Override'}</button>
               </div>
-              <span style={sub}>UAE ex-VAT × 1.03 × 1.15 formula · result is SAR ex-VAT</span>
+              <span style={sub}>UAE ex-VAT × {KSA_FACTOR} (to SAR) × 1.15 VAT · result is SAR ex-VAT</span>
             </div>
 
             {/* QAT */}

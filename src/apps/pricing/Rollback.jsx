@@ -11,6 +11,7 @@ const OP_LABELS = {
   bulk_import:    'Bulk Import',
   markup_change:  'Markup Change',
   rounding_rule:  'Rounding Rule',
+  ksa_recalc:     'KSA Recalculation',
 };
 
 const OP_COLORS = {
@@ -19,6 +20,7 @@ const OP_COLORS = {
   bulk_import:   t.green,
   markup_change: '#c084fc',
   rounding_rule: t.green,
+  ksa_recalc:    t.blue,
 };
 
 function fmt(val) {

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchBrandRule, fetchBrandDefaults, searchItems, fetchItem, fetchHistory, saveItem } from '../../lib/db';
 import { toNum, hasNum, round, money } from '../../lib/num';
-import { calcAllMargins, suggestKSAPrice, suggestQATPrice, calcEmployeePrice, formatMargin, MARGIN_COLORS, calcMSRPs, calcCostBasedMSRPs, DEFAULT_COST_MARGIN_PCT, resolvePriceUsed } from '../../lib/pricing';
+import { calcAllMargins, suggestKSAPrice, suggestQATPrice, calcEmployeePrice, formatMargin, MARGIN_COLORS, calcMSRPs, calcCostBasedMSRPs, DEFAULT_COST_MARGIN_PCT, resolvePriceUsed, KSA_FACTOR } from '../../lib/pricing';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead, segDiv, CURRENCIES, SOURCES, PRICE_USED_OPTIONS } from './styles';
 import BrandSelect from './BrandSelect';
 import { useAuth } from '../../lib/AuthContext';
@@ -638,7 +638,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
                     {form.ksa_overridden?'Revert':'Override'}
                   </button>
                 </div>
-                <span style={sub}>UAE × 1.03 × 1.15 formula</span>
+                <span style={sub}>UAE ex-VAT × {KSA_FACTOR} (to SAR) × 1.15 VAT</span>
               </div>
               <div style={fg}>
                 <label style={lbl}>QAT (QAR) <span style={{color:form.qat_overridden?t.amber:t.t4}}>{form.qat_overridden?'overridden':'auto-suggested'}</span></label>

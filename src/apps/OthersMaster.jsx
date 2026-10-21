@@ -16,7 +16,7 @@ const MODULES = {
   'erp-checks':    { label: 'Catalogue Checks', description: 'The catalogue against the ERP: items missing on either side, and items no price list covers.' },
   'cost-lookup':   { label: 'Cost Lookup',    description: 'Paste a list of item codes and get their EXW costs back.' },
   'global-markup': { label: 'Global Markup',  description: 'Apply and export portfolio-wide markup adjustments.' },
-  'rounding':      { label: 'Price Rounding', description: 'Move stored prices onto the current rounding rule, with a preview and one-step rollback.' },
+  'rounding':      { label: 'Price Rounding', description: 'Move stored prices onto the current rules — rounding, and KSA from UAE — with a preview and one-step rollback.' },
   'purchase-order': { label: 'Purchase Order', description: "Build a PO from the ERP's open purchase requests or from pasted item codes, and download the items file to upload to the ERP." },
 };
 

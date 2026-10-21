@@ -4,6 +4,8 @@ import { planRounding, MARKETS } from '../../lib/rounding';
 import { t, inp, btnW, btnG, lbl, groupBox, groupHead } from '../pricing/styles';
 import { useAuth } from '../../lib/AuthContext';
 import { downloadXLSX } from '../../lib/xlsxExport';
+import { KSA_FACTOR } from '../../lib/pricing';
+import KsaRecalc from './KsaRecalc';
 
 const RULE = [
   ['under 3,000',   'round up to 5, near-hundred snap, hundreds become …99 — the 3,000 mark stays 3,000'],
@@ -107,12 +109,14 @@ export default function PriceRounding() {
             <span style={{ color: t.t3 }}>{rule}</span>
           </div>
         ))}
-        <div style={{ fontSize: 12, color: t.t4, marginTop: 10 }}>
-          A brand's additional markup goes on the unrounded base, so UAE is rounded once; KSA and Qatar
-          derive from the rounded UAE price. Project items are not included — they are quotes. Each one
-          picks up the rule the next time it is saved.
+        <div style={{ fontSize: 12, color: t.t4, marginTop: 10, lineHeight: 1.6 }}>
+          A brand's additional markup goes on the unrounded base, so UAE is rounded once. KSA = UAE ex-VAT × {KSA_FACTOR}
+          (to SAR) + 15% VAT; Qatar = UAE ex-VAT × 1.01, no VAT — both from the rounded UAE price. Project items are not
+          included — they are quotes. Each one picks up the rule the next time it is saved.
         </div>
       </div>
+
+      <KsaRecalc />
 
       <div style={groupBox(false)}>
         <div style={{ ...groupHead, marginBottom: 6 }}>Re-round the catalogue</div>

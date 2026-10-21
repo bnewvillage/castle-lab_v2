@@ -1,5 +1,5 @@
 import { prettifyShelf, suggestKSAPrice, suggestQATPrice, calcMSRPs, calcCostBasedMSRPs, applyAdditionalMarkupUAE, pricesAtAdditionalMarkup, ROUND_TOL } from './pricing';
-import { reroundStored, planRounding, legacyUaeShelf, legacyMarketShelf, MARKETS } from './rounding';
+import { reroundStored, planRounding, planKsaRecalc, legacyUaeShelf, legacyMarketShelf, MARKETS } from './rounding';
 
 const round2 = (v) => Math.round(v * 100) / 100;
 
@@ -62,7 +62,7 @@ describe('prettifyShelf — the rule', () => {
   // UAE re-rounds, KSA and Qatar derive from the new UAE price (see the
   // SCHB-4156218360 test under planRounding).
   test('KSA and Qatar apply the same rule to their own target', () => {
-    expect(round2(suggestKSAPrice(2971.43) * 1.15)).toBe(3500);   // 3,519.66 target
+    expect(round2(suggestKSAPrice(2971.43) * 1.15)).toBe(3450);   // 3,485.49 target
     expect(suggestQATPrice(2971.43)).toBe(3000);                   // 3,001.14 target
   });
 });
@@ -191,8 +191,8 @@ describe('planRounding — the whole pass', () => {
     const { set } = changes[0];
     expect(round2(set.msrp_aed * 1.05)).toBe(3100);
     expect(set.msrp_aed).toBe(2952.38);
-    // KSA derives from the re-rounded UAE price: 2,952.38 × 1.03 × 1.15 =
-    // 3,497.09, floored to 3,450 — not 3,500, which the old UAE price gives.
+    // KSA derives from the re-rounded UAE price: 2,952.38 × 1.02 × 1.15 =
+    // 3,463.14, floored to 3,450.
     expect(round2(set.msrp_sar * 1.15)).toBe(3450);
     expect(set.msrp_sar).toBe(3000);
     // 2,952.38 × 1.01 = 2,981.90, under 3,000 so up to the 5.
@@ -202,7 +202,7 @@ describe('planRounding — the whole pass', () => {
     expect(set.real_msrp_qat).toBe(2985);
   });
 
-  test('WNDL-30184-110 (1,099 EUR at 4.4, 10% additional) ends at 5,500 / 6,200 / 5,200', () => {
+  test('WNDL-30184-110 (1,099 EUR at 4.4, 10% additional) ends at 5,500 / 6,100 / 5,200', () => {
     const wndlRates = { EUR: 4.4 };
     const wndlRules = { WNDL: { markup: 0, additional: 10 } };
     const real = round2(legacyUaeShelf(1099 * 4.4 * 1.05) / 1.05);                 // 5,080 shelf
@@ -218,7 +218,7 @@ describe('planRounding — the whole pass', () => {
     expect(round2(it.msrp_sar * 1.15)).toBe(6310);
     const { set } = planRounding([it], { rates: wndlRates, rules: wndlRules }).changes[0];
     expect(set.msrp_aed).toBe(5238.10);    // 5,500 shelf
-    expect(set.msrp_sar).toBe(5391.30);    // 6,200 shelf
+    expect(set.msrp_sar).toBe(5304.35);    // 6,100 shelf (5,238.10 × 1.02 × 1.15 = 6,144.29)
     expect(set.msrp_qat).toBe(5200);
     // …and exactly what a fresh save gives.
     const fresh = calcMSRPs(1099, 'EUR', 0, 10, wndlRates);
@@ -300,7 +300,7 @@ describe('additional markup — UAE rounds once', () => {
     const p = calcMSRPs(7236.2, 'AED', 0, 5, rates);
     expect(shelf(p.real_msrp_aed, 1.05)).toBe(7500);     // base, for reference
     expect(shelf(p.msrp_aed, 1.05)).toBe(7900);          // 7,977.91 → 7,900 — not 7,500 × 1.05 → 7,800
-    expect(shelf(p.msrp_sar, 1.15)).toBe(8900);
+    expect(shelf(p.msrp_sar, 1.15)).toBe(8800);   // 7,523.81 × 1.02 × 1.15 = 8,825.43
     expect(p.msrp_qat).toBe(7500);
     // No additional markup: one price, as before.
     const n = calcMSRPs(7236.2, 'AED', 0, null, rates);
@@ -313,7 +313,7 @@ describe('additional markup — UAE rounds once', () => {
     expect(shelf(p.msrp_aed, 1.05)).toBe(7900);
   });
 
-  test('old-rule price moves to the round-once price: KSA 9,005 → 8,900, not 8,700', () => {
+  test('old-rule price moves to the round-once price: UAE 7,980 → 7,900, KSA 9,005 → 8,800', () => {
     const real = round2(legacyUaeShelf(7598.01) / 1.05);
     const msrp = round2(legacyUaeShelf(real * 1.05 * 1.05) / 1.05);
     const it = swmt(real, msrp, k, q);
@@ -323,7 +323,7 @@ describe('additional markup — UAE rounds once', () => {
     expect(set.msrp_aed).toBe(fresh.msrp_aed);
     expect(set.msrp_sar).toBe(fresh.msrp_sar);
     expect(set.msrp_qat).toBe(fresh.msrp_qat);
-    expect(shelf(set.msrp_sar, 1.15)).toBe(8900);
+    expect(shelf(set.msrp_sar, 1.15)).toBe(8800);
   });
 
   test('prices saved by the second deploy (additional on the rounded base) are recognised and fixed', () => {
@@ -335,7 +335,7 @@ describe('additional markup — UAE rounds once', () => {
     const { changes, tally } = planRounding([it], { rates, rules: swmtRules });
     expect(tally.aed.exact).toBe(1);
     expect(shelf(changes[0].set.msrp_aed, 1.05)).toBe(7900);
-    expect(shelf(changes[0].set.msrp_sar, 1.15)).toBe(8900);
+    expect(shelf(changes[0].set.msrp_sar, 1.15)).toBe(8800);
     expect(changes[0].set.real_msrp_aed).toBeUndefined();               // the base was already right
   });
 
@@ -353,7 +353,7 @@ describe('additional markup — UAE rounds once', () => {
     expect(shelf(it.msrp_sar, 1.15)).toBe(6000);
     const { set } = planRounding([it], { rates, rules: { WNDL: { markup: 0, additional: 10 } } }).changes[0];
     expect(set.msrp_aed).toBe(5238.10);     // 5,500
-    expect(set.msrp_sar).toBe(5391.30);     // 6,200
+    expect(set.msrp_sar).toBe(5304.35);     // 6,100
     expect(set.msrp_qat).toBe(5200);
   });
 
@@ -417,5 +417,82 @@ describe('pricesAtAdditionalMarkup — Global Markup', () => {
     const p = pricesAtAdditionalMarkup(it, 5, { markup: 10, rates });
     expect(p.fromSource).toBe(true);
     expect(round2(p.msrp_aed * 1.05)).toBe(7900);
+  });
+});
+
+describe('planKsaRecalc — KSA from UAE at the current factor', () => {
+  // A KSA price saved under ×1.03: UAE 510 shelf (485.71 ex-VAT) → KSA 580 shelf.
+  const old103 = (aed) => round2(prettifyShelf(aed * 1.03 * 1.15) / 1.15);
+  const item = (over = {}) => ({
+    item_code: 'TEST-1', brand_code: 'TEST', msrp_aed: 485.71, real_msrp_aed: 485.71,
+    msrp_sar: old103(485.71), real_msrp_sar: old103(485.71), msrp_qat: 495, real_msrp_qat: 495,
+    ksa_overridden: false, ...over,
+  });
+
+  test('a ×1.03 KSA price moves to ×1.02: 580 → 570 SAR shelf', () => {
+    expect(round2(item().msrp_sar * 1.15)).toBe(580);
+    const { changes, tally } = planKsaRecalc([item()]);
+    expect(tally).toEqual({ change: 1, outOfStep: 0, baseOnly: 0, same: 0, overridden: 0, noUae: 0 });
+    expect(changes[0].set).toEqual({ msrp_sar: round2(suggestKSAPrice(485.71)), real_msrp_sar: round2(suggestKSAPrice(485.71)) });
+    expect(round2(changes[0].set.msrp_sar * 1.15)).toBe(570);     // 485.71 × 1.02 × 1.15 = 569.74
+    expect(changes[0].lines).toEqual([{ market: 'sar', before: 580, after: 570, status: 'change' }]);
+  });
+
+  test('never touches UAE or Qatar', () => {
+    const { changes } = planKsaRecalc([item(), item({ item_code: 'TEST-2', msrp_aed: 5142.86, real_msrp_aed: 4761.9 })]);
+    for (const c of changes) expect(Object.keys(c.set).every(k => k.endsWith('_sar'))).toBe(true);
+  });
+
+  test('records all six prices it read, for the compare-and-set on apply', () => {
+    const it = item();
+    expect(planKsaRecalc([it]).changes[0].expect).toEqual({
+      msrp_aed: it.msrp_aed, real_msrp_aed: it.real_msrp_aed, msrp_sar: it.msrp_sar,
+      real_msrp_sar: it.real_msrp_sar, msrp_qat: it.msrp_qat, real_msrp_qat: it.real_msrp_qat,
+    });
+  });
+
+  test('hand-set KSA prices and items with no UAE price are left alone', () => {
+    const { changes, tally } = planKsaRecalc([item({ ksa_overridden: true }), item({ msrp_aed: null })]);
+    expect(changes).toHaveLength(0);
+    expect(tally).toEqual({ change: 0, outOfStep: 0, baseOnly: 0, same: 0, overridden: 1, noUae: 1 });
+  });
+
+  test('real_msrp_sar follows real_msrp_aed (base price before additional markup)', () => {
+    const it = item({ real_msrp_aed: 466.67, real_msrp_sar: old103(466.67) });   // 490 base, 510 selling
+    expect(planKsaRecalc([it]).changes[0].set.real_msrp_sar).toBe(round2(suggestKSAPrice(466.67)));
+  });
+
+  test('a KSA price out of step with its UAE price is listed, not moved — unless asked', () => {
+    // UAE hand-set 3% higher after KSA was derived (Mass Override, KSA left unchanged).
+    const it = item({ msrp_aed: round2(485.71 * 1.03), uae_overridden: true });
+    const off = planKsaRecalc([it]);
+    expect(off.tally).toEqual({ change: 0, outOfStep: 1, baseOnly: 0, same: 0, overridden: 0, noUae: 0 });
+    expect(off.changes.flatMap(c => Object.keys(c.set))).not.toContain('msrp_sar');
+    expect(off.outOfStep).toHaveLength(1);
+    expect(off.outOfStep[0]).toMatchObject({ code: 'TEST-1', before: 580 });
+    const on = planKsaRecalc([it], { includeOutOfStep: true });
+    expect(on.changes[0].set.msrp_sar).toBe(round2(suggestKSAPrice(it.msrp_aed)));
+    expect(on.changes[0].lines[0].status).toBe('outOfStep');
+  });
+
+  test('prices on the old rounding at ×1.03 count as following their UAE price', () => {
+    const legacyK = (a) => round2(legacyMarketShelf(a * 1.03 * 1.15) / 1.15);
+    const aed = round2(1299.95 / 1.05);
+    const { tally } = planKsaRecalc([item({ msrp_aed: aed, real_msrp_aed: aed, msrp_sar: legacyK(aed), real_msrp_sar: legacyK(aed) })]);
+    expect(tally.outOfStep).toBe(0);
+  });
+
+  test('a second run finds nothing: every price is exactly what a save gives today', () => {
+    const items = [];
+    for (let v = 40; v < 12000; v += 37.3) {
+      const aed = round2(prettifyShelf(v * 1.05) / 1.05);
+      items.push(item({ item_code: `T${v}`, msrp_aed: aed, real_msrp_aed: aed, msrp_sar: old103(aed), real_msrp_sar: old103(aed) }));
+    }
+    const first = planKsaRecalc(items);
+    expect(first.changes.length).toBeGreaterThan(0);
+    const applied = items.map(it => ({ ...it, ...(first.changes.find(c => c.item_code === it.item_code)?.set ?? {}) }));
+    const second = planKsaRecalc(applied);
+    expect(second.changes).toHaveLength(0);
+    for (const it of applied) expect(it.msrp_sar).toBe(round2(suggestKSAPrice(it.msrp_aed)));
   });
 });

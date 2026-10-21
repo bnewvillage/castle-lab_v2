@@ -244,3 +244,76 @@ export function planRounding(items, { rates, rules, cutoff } = {}) {
 
   return { changes, tally, scanned: items.length };
 }
+
+// The KSA factor stored prices were derived with until 2026-10-21.
+const KSA_FACTOR_BEFORE = 1.03;
+const ksaBefore = (aed) => round2(prettifyShelf(aed * KSA_FACTOR_BEFORE * 1.15) / 1.15);
+
+/**
+ * Re-derives KSA prices from their stored UAE price with the current rule
+ * (suggestKSAPrice — KSA_FACTOR, rounding). Nothing is inferred: the UAE price
+ * is the input, so the result is exactly what saving the item today would
+ * give its KSA price. UAE and Qatar are not touched. Pure: no I/O.
+ *
+ * Only KSA prices that FOLLOW their UAE price today are moved by default — ones
+ * that equal what the previous factor (current or old rounding) or the current
+ * one makes from it. A KSA price out of step with its UAE price was not left
+ * that way by the rule: usually the UAE price was changed by hand afterwards,
+ * or a Mass Override left KSA unchanged on purpose. A factor change is no
+ * reason to overwrite that, so those are listed and moved only on request.
+ *
+ * Skipped: KSA overridden (hand-set), and no UAE price to derive from.
+ * real_msrp_sar follows real_msrp_aed the same way.
+ *
+ * tally: change (KSA shelf price moves) · outOfStep (KSA doesn't follow UAE;
+ *        moved only with includeOutOfStep) · baseOnly (only real_msrp_sar moves)
+ *        · same · overridden · noUae
+ */
+export function planKsaRecalc(items, { includeOutOfStep = false } = {}) {
+  const m = MARKETS.sar;
+  const follows = (stored, aed) =>
+    same(stored, ksaBefore(aed)) || same(stored, legacyKSA(aed)) || same(stored, freshKSA(aed));
+  const tally = { change: 0, outOfStep: 0, baseOnly: 0, same: 0, overridden: 0, noUae: 0 };
+  const changes = [], outOfStep = [];
+  for (const item of items) {
+    if (item[m.flag]) { tally.overridden++; continue; }
+    const aed = toNum(item.msrp_aed);
+    if (aed == null) { tally.noUae++; continue; }
+    const set = {}, lines = [];
+    const next = round2(suggestKSAPrice(aed));
+    let stepped = false;
+    if (!same(next, item[m.field])) {
+      const line = { market: 'sar', before: shelfOf(item[m.field], m.vat), after: shelfOf(next, m.vat), status: 'change' };
+      if (item[m.field] == null || follows(item[m.field], aed)) {
+        set[m.field] = next; lines.push(line);
+      } else {
+        stepped = true;
+        outOfStep.push({ ...line, code: item.item_code, name: item.item_name ?? '', uae: shelfOf(aed, MARKETS.aed.vat) });
+        if (includeOutOfStep) { set[m.field] = next; lines.push({ ...line, status: 'outOfStep' }); }
+      }
+    }
+    const realAed = toNum(item.real_msrp_aed);
+    if (realAed != null) {
+      const realNext = round2(suggestKSAPrice(realAed));
+      if (!same(realNext, item[m.real]) && (item[m.real] == null || follows(item[m.real], realAed) || includeOutOfStep)) {
+        set[m.real] = realNext;
+      }
+    }
+    if (stepped) tally.outOfStep++;
+    if (!Object.keys(set).length) { if (!stepped) tally.same++; continue; }
+    // A real_msrp_sar-only change is still written, though no shelf price moves.
+    if (!stepped) tally[lines.length ? 'change' : 'baseOnly']++;
+    changes.push({
+      item_code:  item.item_code,
+      item_name:  item.item_name ?? '',
+      brand_code: item.brand_code ?? null,
+      set,
+      expect: Object.fromEntries(Object.values(MARKETS).flatMap(mk => [
+        [mk.field, toNum(item[mk.field])], [mk.real, toNum(item[mk.real])],
+      ])),
+      lines,
+      approx: false,
+    });
+  }
+  return { changes, outOfStep, tally, scanned: items.length };
+}
