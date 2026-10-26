@@ -2,6 +2,7 @@ import { supabase, supabaseUrl, supabaseAnonKey } from './supabase';
 import { DEMO } from '../demo/demoConfig';
 import { orExpression, matchesSearch } from './search';
 import { downloadXLSX } from './xlsxExport';
+import { MARKETS } from './markets';
 
 // Barcode values are long numeric strings — wrap in Excel text formula so they
 // aren't auto-converted to numbers or scientific notation when opened in Excel.
@@ -35,9 +36,7 @@ export function flattenItem(item) {
   const { _margins, ...rest } = item;
   return {
     ...rest,
-    uae_margin_pct:  _margins.uae_margin  != null ? +_margins.uae_margin.toFixed(2)  : null,
-    ksa_margin_pct:  _margins.ksa_margin  != null ? +_margins.ksa_margin.toFixed(2)  : null,
-    qat_margin_pct:  _margins.qat_margin  != null ? +_margins.qat_margin.toFixed(2)  : null,
+    ...Object.fromEntries(MARKETS.map(m => [`${m.margin}_pct`, _margins[m.margin] != null ? +_margins[m.margin].toFixed(2) : null])),
     exw_margin_pct:  _margins.exw_margin  != null ? +_margins.exw_margin.toFixed(2)  : null,
     landed_cost_aed: _margins.landed_cost_aed ?? null,
   };

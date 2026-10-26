@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { fetchBrandsWithStats, updateBrandMarkup, insertBrand, fetchBrandItems, bulkUpdateMarkupPrices } from '../../lib/db';
-import { calcEXWMargin, calcLandedCost, calcMargin, formatMargin, MARGIN_COLORS, suggestKSAPrice, suggestQATPrice, suggestKWDPrice, resolvePriceUsed, compoundMarkup, calcMSRPs } from '../../lib/pricing';
+import { calcEXWMargin, calcLandedCost, calcMargin, formatMargin, MARGIN_COLORS, resolvePriceUsed, compoundMarkup, calcMSRPs } from '../../lib/pricing';
+import { MARKETS, UAE, DERIVED, deriveMarket } from '../../lib/markets';
 import { t, inp, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead } from './styles';
 import { useAuth } from '../../lib/AuthContext';
 
@@ -196,48 +197,35 @@ function ContextMenu({ x, y, brand, isExpanded, onToggle, onEdit, onDismiss, isV
 }
 
 // ── MARKUP PREVIEW MODAL ──────────────────────────────────────
+// Every price an item would have at a new brand markup: UAE from source, the
+// other markets from the new UAE prices — each unless hand-set.
 function computeChanges(items, newMarkup, additionalMarkupPct, rates) {
   return items.map(item => {
     const { value: priceVal, currency: priceCur } = resolvePriceUsed(item);
-    const pf2 = v => v != null ? parseFloat(v.toFixed(2)) : v;
-    const pf3 = v => v != null ? parseFloat(v.toFixed(3)) : v;
 
     // Default to existing values
-    let new_real_aed = item.real_msrp_aed ?? item.msrp_aed;
-    let new_aed      = item.msrp_aed;
-
-    // Two-pass prettification via calcMSRPs — only when source price exists and UAE not overridden
+    let aed     = item.msrp_aed;
+    let realAed = item.real_msrp_aed ?? item.msrp_aed;
     if (!item.uae_overridden && priceVal && priceCur) {
       const msrps = calcMSRPs(priceVal, priceCur, newMarkup, additionalMarkupPct ?? null, rates);
-      if (msrps) { new_real_aed = msrps.real_msrp_aed; new_aed = msrps.msrp_aed; }
+      if (msrps) { realAed = msrps.real_msrp_aed; aed = msrps.msrp_aed; }
     }
 
-    // SAR, QAT and KWD derived from the current AED values (override-aware)
-    const new_real_sar = (!item.ksa_overridden && new_real_aed) ? pf2(suggestKSAPrice(new_real_aed) ?? item.real_msrp_sar) : (item.real_msrp_sar ?? item.msrp_sar);
-    const new_real_qat = (!item.qat_overridden && new_real_aed) ? pf2(suggestQATPrice(new_real_aed) ?? item.real_msrp_qat) : (item.real_msrp_qat ?? item.msrp_qat);
-    const new_sar = (!item.ksa_overridden && new_aed) ? pf2(suggestKSAPrice(new_aed) ?? item.msrp_sar) : item.msrp_sar;
-    const new_qat = (!item.qat_overridden && new_aed) ? pf2(suggestQATPrice(new_aed) ?? item.msrp_qat) : item.msrp_qat;
-    const new_real_kwd = (!item.kwd_overridden && new_real_aed) ? pf3(suggestKWDPrice(new_real_aed) ?? item.real_msrp_kwd) : (item.real_msrp_kwd ?? item.msrp_kwd);
-    const new_kwd = (!item.kwd_overridden && new_aed) ? pf3(suggestKWDPrice(new_aed) ?? item.msrp_kwd) : item.msrp_kwd;
-
-    const aed_diff = new_aed != null && item.msrp_aed != null ? new_aed - item.msrp_aed : null;
-    const sar_diff = new_sar != null && item.msrp_sar != null ? new_sar - item.msrp_sar : null;
-    const qat_diff = new_qat != null && item.msrp_qat != null ? new_qat - item.msrp_qat : null;
-    const kwd_diff = new_kwd != null && item.msrp_kwd != null ? new_kwd - item.msrp_kwd : null;
-
-    return {
-      item_code: item.item_code,
-      old_aed: item.msrp_aed, new_aed, aed_diff,
-      old_sar: item.msrp_sar, new_sar, sar_diff,
-      old_qat: item.msrp_qat, new_qat, qat_diff,
-      old_kwd: item.msrp_kwd, new_kwd, kwd_diff,
-      new_real_aed, new_real_sar, new_real_qat, new_real_kwd,
-    };
+    const next = { [UAE.price]: aed, [UAE.real]: realAed };
+    for (const m of DERIVED) {
+      const own = !item[m.flag];
+      next[m.price] = own && aed     ? deriveMarket(m, aed)     : item[m.price];
+      next[m.real]  = own && realAed ? deriveMarket(m, realAed) : (item[m.real] ?? item[m.price]);
+    }
+    const diff = Object.fromEntries(MARKETS.map(m => [m.key,
+      next[m.price] != null && item[m.price] != null ? next[m.price] - item[m.price] : null]));
+    const old = Object.fromEntries(MARKETS.map(m => [m.price, item[m.price]]));
+    return { item_code: item.item_code, old, next, diff };
   });
 }
 
-function avgDiff(changes, field) {
-  const vals = changes.map(c => c[field]).filter(v => v != null && v !== 0);
+function avgDiff(changes, key) {
+  const vals = changes.map(c => c.diff[key]).filter(v => v != null && v !== 0);
   if (!vals.length) return null;
   return vals.reduce((s, v) => s + v, 0) / vals.length;
 }
@@ -261,16 +249,7 @@ function MarkupPreviewModal({ brand, oldMarkup, newMarkup, changes, applying, on
   const last    = showAll ? []      : changes.slice(-SAMPLE);
   const middle  = showAll ? 0       : changes.length - SAMPLE * 2;
 
-  const aedAvg = avgDiff(changes, 'aed_diff');
-  const sarAvg = avgDiff(changes, 'sar_diff');
-  const qatAvg = avgDiff(changes, 'qat_diff');
-  const kwdAvg = avgDiff(changes, 'kwd_diff');
-  const affected = changes.filter(c =>
-    (c.aed_diff != null && c.aed_diff !== 0) ||
-    (c.sar_diff != null && c.sar_diff !== 0) ||
-    (c.qat_diff != null && c.qat_diff !== 0) ||
-    (c.kwd_diff != null && c.kwd_diff !== 0)
-  ).length;
+  const affected = changes.filter(c => MARKETS.some(m => c.diff[m.key])).length;
 
   const statColor = v => v == null ? t.t4 : v > 0 ? t.green : t.red;
 
@@ -279,10 +258,7 @@ function MarkupPreviewModal({ brand, oldMarkup, newMarkup, changes, applying, on
   const renderRows = (rows) => rows.map(c => (
     <tr key={c.item_code}>
       <td style={{ ...tdStyle, fontFamily:'var(--font-mono)', fontSize:12, color:t.blue }}>{c.item_code}</td>
-      <DiffCell oldVal={c.old_aed} newVal={c.new_aed} diff={c.aed_diff} />
-      <DiffCell oldVal={c.old_sar} newVal={c.new_sar} diff={c.sar_diff} />
-      <DiffCell oldVal={c.old_qat} newVal={c.new_qat} diff={c.qat_diff} />
-      <DiffCell oldVal={c.old_kwd} newVal={c.new_kwd} diff={c.kwd_diff} />
+      {MARKETS.map(m => <DiffCell key={m.key} oldVal={c.old[m.price]} newVal={c.next[m.price]} diff={c.diff[m.key]} />)}
     </tr>
   ));
 
@@ -314,7 +290,7 @@ function MarkupPreviewModal({ brand, oldMarkup, newMarkup, changes, applying, on
             <div style={{ fontSize:11, color:t.t4, fontFamily:'var(--font-mono)', marginBottom:3 }}>affected</div>
             <div style={{ fontSize:20, color:affected > 0 ? t.amber : t.t4, fontFamily:'var(--font-mono)', fontWeight:500 }}>{affected}</div>
           </div>
-          {[['avg Δ AED', aedAvg], ['avg Δ SAR', sarAvg], ['avg Δ QAR', qatAvg], ['avg Δ KWD', kwdAvg]].map(([label, val]) => (
+          {MARKETS.map(m => [`avg Δ ${m.currency}`, avgDiff(changes, m.key)]).map(([label, val]) => (
             <div key={label}>
               <div style={{ fontSize:11, color:t.t4, fontFamily:'var(--font-mono)', marginBottom:3 }}>{label}</div>
               <div style={{ fontSize:20, color:statColor(val), fontFamily:'var(--font-mono)', fontWeight:500 }}>
@@ -330,17 +306,14 @@ function MarkupPreviewModal({ brand, oldMarkup, newMarkup, changes, applying, on
             <thead>
               <tr>
                 <th style={{ ...previewTh, minWidth:160 }}>Item code</th>
-                <th style={{ ...previewTh, minWidth:150 }}>AED (old / new / Δ)</th>
-                <th style={{ ...previewTh, minWidth:150 }}>SAR (old / new / Δ)</th>
-                <th style={{ ...previewTh, minWidth:150 }}>QAR (old / new / Δ)</th>
-                <th style={{ ...previewTh, minWidth:150 }}>KWD (old / new / Δ)</th>
+                {MARKETS.map(m => <th key={m.key} style={{ ...previewTh, minWidth:150 }}>{m.currency} (old / new / Δ)</th>)}
               </tr>
             </thead>
             <tbody>
               {renderRows(first)}
               {middle > 0 && (
                 <tr>
-                  <td colSpan={5} style={{ padding:'10px 16px', textAlign:'center', fontSize:11, color:t.t4, fontFamily:'var(--font-mono)', background:'rgba(255,255,255,0.02)', borderBottom:`1px solid ${t.b1}` }}>
+                  <td colSpan={MARKETS.length + 1} style={{ padding:'10px 16px', textAlign:'center', fontSize:11, color:t.t4, fontFamily:'var(--font-mono)', background:'rgba(255,255,255,0.02)', borderBottom:`1px solid ${t.b1}` }}>
                     ··· {middle.toLocaleString()} more items ···
                   </td>
                 </tr>
@@ -429,18 +402,8 @@ export default function Brands({ rates = {}, onToast, refreshKey }) {
     try {
       await updateBrandMarkup(brand.brand_code, newMarkup);
       const updates = changes
-        .filter(c => c.new_aed != null || c.new_sar != null || c.new_qat != null || c.new_kwd != null)
-        .map(c => ({
-          item_code:    c.item_code,
-          msrp_aed:     c.new_aed,
-          msrp_sar:     c.new_sar,
-          msrp_qat:     c.new_qat,
-          real_msrp_aed: c.new_real_aed,
-          real_msrp_sar: c.new_real_sar,
-          real_msrp_qat: c.new_real_qat,
-          msrp_kwd:      c.new_kwd,
-          real_msrp_kwd: c.new_real_kwd,
-        }));
+        .filter(c => MARKETS.some(m => c.next[m.price] != null))
+        .map(c => ({ item_code: c.item_code, ...c.next }));
       await bulkUpdateMarkupPrices(updates);
       setBrands(prev => prev.map(b => b.brand_code === brand.brand_code ? { ...b, markup_percentage: newMarkup } : b));
       setPreview(null);

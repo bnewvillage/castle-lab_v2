@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchProjectItems, saveProjectItem, deleteProjectItem, bulkUpdateProjectItems } from '../../lib/db';
-import { calcProjectPrice, formatMargin, MARGIN_COLORS, suggestKSAPrice, suggestQATPrice, suggestKWDPrice, DEFAULT_PROJECT_MARGIN_PCT } from '../../lib/pricing';
+import { calcProjectPrice, formatMargin, MARGIN_COLORS, DEFAULT_PROJECT_MARGIN_PCT } from '../../lib/pricing';
+import { DERIVED, deriveMarkets } from '../../lib/markets';
 import { BulkEditBar, BulkEditModal } from './ProjectBulkEdit';
 import ProjectItemForm from './ProjectItemForm';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead } from './styles';
@@ -39,14 +40,12 @@ const SORT_HEADERS = [
   { label: 'Cost',          key: 'cost' },
   { label: 'Inc VAT (AED)', key: 'msrp_aed_inc_vat' },
   { label: 'Ex VAT (AED)', key: 'msrp_aed_ex_vat' },
-  { label: 'KSA (SAR)',    key: 'msrp_sar' },
-  { label: 'QAT (QAR)',   key: 'msrp_qat' },
-  { label: 'KWT (KWD)',   key: 'msrp_kwd' },
+  ...DERIVED.map(m => ({ label: `${m.short} (${m.currency})`, key: m.price })),
   { label: 'Margin',      key: 'target_margin_pct' },
   { label: '',             key: null },
 ];
 
-const GRID_COLS = '32px 145px 1fr 105px 125px 115px 110px 110px 110px 80px auto';
+const GRID_COLS = `32px 145px 1fr 105px 125px 115px ${DERIVED.map(() => '110px').join(' ')} 80px auto`;
 
 // ── ROOT ──────────────────────────────────────────────────────
 export default function ProjectItems({ rates, setExportActions, onToast, isActive, refreshKey }) {
@@ -79,7 +78,7 @@ export default function ProjectItems({ rates, setExportActions, onToast, isActiv
     const landedAED = result?.landed_cost_aed ?? null;
     const exVat     = item.msrp_aed_ex_vat;
     const margin    = (exVat > 0 && landedAED != null)
-      ? parseFloat(((exVat - landedAED) / exVat * 100).toFixed(2))
+      ? round((exVat - landedAED) / exVat * 100)
       : null;
     return {
       ...item,
@@ -133,9 +132,7 @@ export default function ProjectItems({ rates, setExportActions, onToast, isActiv
           target_margin_pct: merged.target_margin_pct,
           msrp_aed_inc_vat:  item.uae_overridden ? item.msrp_aed_inc_vat : (priced?.msrp_aed_inc_vat ?? null),
           msrp_aed_ex_vat:   exVat,
-          msrp_sar: item.ksa_overridden ? item.msrp_sar : round(suggestKSAPrice(exVat)),
-          msrp_qat: item.qat_overridden ? item.msrp_qat : round(suggestQATPrice(exVat)),
-          msrp_kwd: item.kwd_overridden ? item.msrp_kwd : round(suggestKWDPrice(exVat), 3),
+          ...deriveMarkets(exVat, { keep: item }),
         };
       });
       await bulkUpdateProjectItems(updates);
@@ -333,18 +330,12 @@ export default function ProjectItems({ rates, setExportActions, onToast, isActiv
                   <span style={{ fontSize:12, color:t.t2, fontFamily:'var(--font-mono)' }}>
                     {money(item.msrp_aed_ex_vat, 'AED', 2)}
                   </span>
-                  <span style={{ fontSize:12, color:t.t3, fontFamily:'var(--font-mono)' }}>
-                    {money(item.msrp_sar, 'SAR', 2)}
-                    {item.ksa_overridden && <span style={{ fontSize:9, color:t.amber, marginLeft:4 }}>↑</span>}
-                  </span>
-                  <span style={{ fontSize:12, color:t.t3, fontFamily:'var(--font-mono)' }}>
-                    {money(item.msrp_qat, 'QAR', 2)}
-                    {item.qat_overridden && <span style={{ fontSize:9, color:t.amber, marginLeft:4 }}>↑</span>}
-                  </span>
-                  <span style={{ fontSize:12, color:t.t3, fontFamily:'var(--font-mono)' }}>
-                    {money(item.msrp_kwd, 'KWD')}
-                    {item.kwd_overridden && <span style={{ fontSize:9, color:t.amber, marginLeft:4 }}>↑</span>}
-                  </span>
+                  {DERIVED.map(m => (
+                    <span key={m.key} style={{ fontSize:12, color:t.t3, fontFamily:'var(--font-mono)' }}>
+                      {money(item[m.price], m.currency, m.dp)}
+                      {item[m.flag] && <span style={{ fontSize:9, color:t.amber, marginLeft:4 }}>↑</span>}
+                    </span>
+                  ))}
                   <span style={{ fontSize:12, color:t.t3, fontFamily:'var(--font-mono)' }}>
                     {item.target_margin_pct ?? DEFAULT_PROJECT_MARGIN_PCT}%
                   </span>

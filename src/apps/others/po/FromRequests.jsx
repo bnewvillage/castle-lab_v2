@@ -4,7 +4,7 @@ import { useAuth } from '../../../lib/AuthContext';
 import { fetchItemsByCodes } from '../../../lib/db';
 import { fetchPurchaseRequests } from '../../../lib/erpProxy';
 import { downloadText } from '../../../lib/csvExport';
-import { toNum } from '../../../lib/num';
+import { toNum, round } from '../../../lib/num';
 import { prepareRequestLines, requestLineCheck, requestPoCurrency, requestPoCsv, erpDate } from '../../../lib/purchaseOrder';
 import ErpConnection from '../ErpConnection';
 import { Pill, DefaultDelivery, LineDelivery, todayIso, money } from './shared';
@@ -17,7 +17,7 @@ const qtyInput = {
   width: 64, background: t.bg1, border: `1px solid ${t.b2}`, borderRadius: 6, color: t.t1,
   fontSize: 12.5, fontFamily: 'var(--font-mono)', padding: '4px 6px', textAlign: 'right',
 };
-const fmtQty = (v) => (v == null ? '—' : String(parseFloat(Number(v).toFixed(4))));
+const fmtQty = (v) => (v == null ? '—' : String(round(v, 4)));
 const who = (email) => (email ? String(email).split('@')[0] : '');
 
 export default function FromRequests({ creds, setCreds }) {

@@ -8,6 +8,7 @@ import * as XLSX from 'xlsx-js-style';
 import { fetchBrands, fetchRates } from './db';
 import { toNum } from './num';
 import { calcMSRPs, calcCostBasedMSRPs, DEFAULT_COST_MARGIN_PCT, resolvePriceUsed } from './pricing';
+import { PRICE_COLUMNS, REAL_COLUMNS } from './markets';
 import { CURRENCIES } from '../apps/pricing/styles';
 
 export const PRICE_USED_OPTIONS = ['primary_ex_vat','primary_inc_vat','secondary_ex_vat','secondary_inc_vat','cost_based'];
@@ -126,21 +127,15 @@ export function validateAndCalc(row, brandMap, markupCache, additionalMarkupCach
     errors.push('target_margin_pct must be a number between 0 and 100');
   }
 
-  // Compute all 8 MSRP fields via calcMSRPs / calcCostBasedMSRPs
-  let msrp_aed = null, msrp_sar = null, msrp_qat = null, msrp_kwd = null;
-  let real_msrp_aed = null, real_msrp_sar = null, real_msrp_qat = null, real_msrp_kwd = null;
-  if (errors.length === 0) {
-    const msrps = isCostBased
-      ? calcCostBasedMSRPs(toNum(row.exw_cost), row.cost_currency, targetMargin ?? DEFAULT_COST_MARGIN_PCT, rates, additionalMarkupCache[brandCode] ?? null)
-      : calcMSRPs(priceVal, priceCurrency, markupCache[brandCode] ?? 10, additionalMarkupCache[brandCode] ?? null, rates);
-    if (msrps) ({ msrp_aed, msrp_sar, msrp_qat, msrp_kwd, real_msrp_aed, real_msrp_sar, real_msrp_qat, real_msrp_kwd } = msrps);
-  }
+  // Every market's prices via calcMSRPs / calcCostBasedMSRPs
+  const msrps = errors.length > 0 ? null : isCostBased
+    ? calcCostBasedMSRPs(toNum(row.exw_cost), row.cost_currency, targetMargin ?? DEFAULT_COST_MARGIN_PCT, rates, additionalMarkupCache[brandCode] ?? null)
+    : calcMSRPs(priceVal, priceCurrency, markupCache[brandCode] ?? 10, additionalMarkupCache[brandCode] ?? null, rates);
 
   return {
     ...row, brand_code: brandCode,
     _errors: errors, _warnings: warnings, _status: errors.length > 0 ? 'error' : 'ready',
-    msrp_aed, msrp_sar, msrp_qat, msrp_kwd,
-    real_msrp_aed, real_msrp_sar, real_msrp_qat, real_msrp_kwd,
+    ...Object.fromEntries([...PRICE_COLUMNS, ...REAL_COLUMNS].map(c => [c, msrps?.[c] ?? null])),
   };
 }
 

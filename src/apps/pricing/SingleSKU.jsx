@@ -2,14 +2,15 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchBrandRule, fetchBrandDefaults, searchItems, fetchItem, fetchHistory, saveItem } from '../../lib/db';
 import { toNum, hasNum, round, money } from '../../lib/num';
-import { calcAllMargins, suggestKSAPrice, suggestQATPrice, suggestKWDPrice, calcEmployeePrice, formatMargin, MARGIN_COLORS, calcMSRPs, calcCostBasedMSRPs, DEFAULT_COST_MARGIN_PCT, resolvePriceUsed, KSA_FACTOR, KWD_FACTOR } from '../../lib/pricing';
+import { calcAllMargins, calcEmployeePrice, formatMargin, MARGIN_COLORS, calcMSRPs, calcCostBasedMSRPs, DEFAULT_COST_MARGIN_PCT, resolvePriceUsed } from '../../lib/pricing';
+import { MARKETS, DERIVED, PRICE_COLUMNS, REAL_COLUMNS, FLAG_COLUMNS, deriveMarkets } from '../../lib/markets';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead, segDiv, CURRENCIES, SOURCES, PRICE_USED_OPTIONS } from './styles';
 import BrandSelect from './BrandSelect';
 import { useAuth } from '../../lib/AuthContext';
 import { downloadXLSX } from '../../lib/xlsxExport';
 
 /**
- * The six MSRP fields implied by the current form, or null when there is not
+ * Every market's prices implied by the current form, or null when there is not
  * enough input yet. Both pricing bases go through here, so a cost-based row and
  * an MSRP-based row can never drift apart — they previously lived in two
  * copy-pasted effects that already disagreed on how KSA was derived.
@@ -35,10 +36,13 @@ const BLANK = {
   msrp_primary_ex_vat:'', msrp_primary_inc_vat:'', msrp_primary_currency:'EUR',
   msrp_secondary_ex_vat:'', msrp_secondary_inc_vat:'', msrp_secondary_currency:'',
   price_used:'', price_source:'',
-  msrp_aed:'', msrp_sar:'', msrp_qat:'', msrp_kwd:'', target_margin_pct:'',
-  uae_overridden:false, ksa_overridden:false, qat_overridden:false, kwd_overridden:false,
+  ...Object.fromEntries(PRICE_COLUMNS.map(c => [c, ''])), target_margin_pct:'',
+  ...Object.fromEntries(FLAG_COLUMNS.map(c => [c, false])),
   cost_currency:'EUR', exw_cost:'', shipping_rate:'0', customs_duty_rate:'5.5', cost_source:'',
 };
+
+// One card per market: its price and its margin.
+const marketCards = (item, margins) => MARKETS.map(m => ({ country: m.short, price: money(item[m.price], m.currency), margin: margins?.[m.margin] }));
 
 const PERSIST_KEYS = ['brand_code','cost_currency','shipping_rate','customs_duty_rate','cost_source','price_source','msrp_primary_currency'];
 
@@ -108,15 +112,9 @@ export default function SingleSKU({ rates, brands, editTarget, onEditTargetConsu
       price_used:              selected.price_used ?? '',
       price_source:            selected.price_source ?? '',
       cost_source:             selected.cost_source ?? '',
-      msrp_aed:                selected.msrp_aed ?? '',
-      msrp_sar:                selected.msrp_sar ?? '',
-      msrp_qat:                selected.msrp_qat ?? '',
-      msrp_kwd:                selected.msrp_kwd ?? '',
+      ...Object.fromEntries(PRICE_COLUMNS.map(c => [c, selected[c] ?? ''])),
       landed_cost_aed:         margins?.landed_cost_aed != null ? +margins.landed_cost_aed.toFixed(2) : '',
-      uae_margin_pct:          margins?.uae_margin != null ? +margins.uae_margin.toFixed(2) : '',
-      ksa_margin_pct:          margins?.ksa_margin != null ? +margins.ksa_margin.toFixed(2) : '',
-      qat_margin_pct:          margins?.qat_margin != null ? +margins.qat_margin.toFixed(2) : '',
-      kwd_margin_pct:          margins?.kwd_margin != null ? +margins.kwd_margin.toFixed(2) : '',
+      ...Object.fromEntries(MARKETS.map(m => [`${m.margin}_pct`, margins?.[m.margin] != null ? +margins[m.margin].toFixed(2) : ''])),
       exw_margin_pct:          margins?.exw_margin != null ? +margins.exw_margin.toFixed(2) : '',
       employee_price_aed:      emp ?? '',
       updated_at:              selected.updated_at ?? '',
@@ -185,13 +183,8 @@ export default function SingleSKU({ rates, brands, editTarget, onEditTargetConsu
                 <button style={{ ...btnG, ...btnSm }} onClick={()=>{setEditMode(true);setShowForm(true);}}>View</button>
               </div>
             </div>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:1, background:t.b1 }}>
-              {[
-                {country:'UAE',price:money(selected.msrp_aed,'AED'),margin:margins?.uae_margin},
-                {country:'KSA',price:money(selected.msrp_sar,'SAR'),margin:margins?.ksa_margin},
-                {country:'QAT',price:money(selected.msrp_qat,'QAR'),margin:margins?.qat_margin},
-                {country:'KWT',price:money(selected.msrp_kwd,'KWD'),margin:margins?.kwd_margin},
-              ].map(({country,price,margin}) => {
+            <div style={{ display:'grid', gridTemplateColumns:`repeat(${MARKETS.length},1fr)`, gap:1, background:t.b1 }}>
+              {marketCards(selected, margins).map(({country,price,margin}) => {
                 const m=formatMargin(margin);
                 return (
                   <div key={country} style={{ background:t.bg2, padding:'16px 20px' }}>
@@ -271,18 +264,15 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
 
   const set = (key,val) => setForm(f=>({...f,[key]:val}));
 
-  // Recalc KSA/QAT/KWT when UAE changes
+  // Recalc every other market when UAE changes, or when a market's override
+  // is reverted (handSet: which markets are hand-set).
+  const handSet = DERIVED.map(m => (form[m.flag] ? 1 : 0)).join('');
   useEffect(() => {
     if (viewMode) return;
     const uae = toNum(form.msrp_aed);
     if (!uae) return;
-    setForm(f => ({
-      ...f,
-      msrp_sar: f.ksa_overridden ? f.msrp_sar : round(suggestKSAPrice(uae)),
-      msrp_qat: f.qat_overridden ? f.msrp_qat : round(suggestQATPrice(uae)),
-      msrp_kwd: f.kwd_overridden ? f.msrp_kwd : round(suggestKWDPrice(uae), 3),
-    }));
-  }, [form.msrp_aed, viewMode]);
+    setForm(f => ({ ...f, ...deriveMarkets(uae, { keep: f }) }));
+  }, [form.msrp_aed, viewMode, handSet]);
 
   // Load markup + hints
   useEffect(() => {
@@ -307,14 +297,9 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
       const aed = f.uae_overridden ? f.msrp_aed : msrps.msrp_aed;
       return {
         ...f,
-        msrp_aed:      aed,
-        msrp_sar:      f.ksa_overridden ? f.msrp_sar : round(suggestKSAPrice(aed)),
-        msrp_qat:      f.qat_overridden ? f.msrp_qat : round(suggestQATPrice(aed)),
-        msrp_kwd:      f.kwd_overridden ? f.msrp_kwd : round(suggestKWDPrice(aed), 3),
-        real_msrp_aed: msrps.real_msrp_aed,
-        real_msrp_sar: msrps.real_msrp_sar,
-        real_msrp_qat: msrps.real_msrp_qat,
-        real_msrp_kwd: msrps.real_msrp_kwd,
+        msrp_aed: aed,
+        ...deriveMarkets(aed, { keep: f }),
+        ...Object.fromEntries(REAL_COLUMNS.map(c => [c, msrps[c]])),
       };
     });
   }, [form.price_used,form.msrp_primary_ex_vat,form.msrp_primary_inc_vat,form.msrp_primary_currency,
@@ -338,14 +323,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
     msrp_primary_inc_vat:   hasVal(form.msrp_primary_inc_vat)?toNum(form.msrp_primary_inc_vat):null,
     msrp_secondary_ex_vat:  hasVal(form.msrp_secondary_ex_vat)?toNum(form.msrp_secondary_ex_vat):null,
     msrp_secondary_inc_vat: hasVal(form.msrp_secondary_inc_vat)?toNum(form.msrp_secondary_inc_vat):null,
-    msrp_aed:               hasVal(form.msrp_aed)?toNum(form.msrp_aed):null,
-    msrp_sar:               hasVal(form.msrp_sar)?toNum(form.msrp_sar):null,
-    msrp_qat:               hasVal(form.msrp_qat)?toNum(form.msrp_qat):null,
-    msrp_kwd:               hasVal(form.msrp_kwd)?toNum(form.msrp_kwd):null,
-    real_msrp_aed:          hasVal(form.real_msrp_aed)?toNum(form.real_msrp_aed):null,
-    real_msrp_sar:          hasVal(form.real_msrp_sar)?toNum(form.real_msrp_sar):null,
-    real_msrp_qat:          hasVal(form.real_msrp_qat)?toNum(form.real_msrp_qat):null,
-    real_msrp_kwd:          hasVal(form.real_msrp_kwd)?toNum(form.real_msrp_kwd):null,
+    ...Object.fromEntries([...PRICE_COLUMNS, ...REAL_COLUMNS].map(c => [c, toNum(form[c])])),
     target_margin_pct:      form.price_used==='cost_based' ? (hasVal(form.target_margin_pct)?toNum(form.target_margin_pct):DEFAULT_COST_MARGIN_PCT) : null,
   });
 
@@ -371,7 +349,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
     const priceRate     = rates[priceCurrency] || 1;
     const costRate      = rates[form.cost_currency] || 1;
     const priceAED      = priceVal * priceRate;
-    const estimatedCost = parseFloat((priceAED * (1 - target / 100) / costRate).toFixed(4));
+    const estimatedCost = round(priceAED * (1 - target / 100) / costRate, 4);
     set('exw_cost', estimatedCost);
     setEstimateError('');
     setShowEstimate(false); setEstimateTarget('');
@@ -506,13 +484,8 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
           <div style={{color:t.t4,fontSize:13,textAlign:'center',padding:'24px 0'}}>Fill in price data to see calculations</div>
         ):(
           <div style={{display:'flex',flexDirection:'column',gap:0}}>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:1,background:t.b1,borderRadius:8,overflow:'hidden',marginBottom:12}}>
-              {[
-                {country:'UAE',price:money(item.msrp_aed,'AED'),margin:margins?.uae_margin},
-                {country:'KSA',price:money(item.msrp_sar,'SAR'),margin:margins?.ksa_margin},
-                {country:'QAT',price:money(item.msrp_qat,'QAR'),margin:margins?.qat_margin},
-                {country:'KWT',price:money(item.msrp_kwd,'KWD'),margin:margins?.kwd_margin},
-              ].map(({country,price,margin})=>{
+            <div style={{display:'grid',gridTemplateColumns:`repeat(${MARKETS.length},1fr)`,gap:1,background:t.b1,borderRadius:8,overflow:'hidden',marginBottom:12}}>
+              {marketCards(item, margins).map(({country,price,margin})=>{
                 const m=formatMargin(margin);
                 return(
                   <div key={country} style={{background:t.bg2,padding:'14px 16px'}}>
@@ -634,45 +607,23 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
                   {form.uae_overridden?'Revert':'Override'}
                 </button>
               </div>
-              <span style={sub}>{form.price_used==='cost_based'?'Ex-VAT · derived from cost at target margin · override to set manually · KSA/QAT/KWT recalc on change':'Ex-VAT · brand markup applied · override to set manually · KSA/QAT/KWT recalc on change'}</span>
+              <span style={sub}>{`Ex-VAT · ${form.price_used==='cost_based'?'derived from cost at target margin':'brand markup applied'} · override to set manually · ${DERIVED.map(m=>m.short).join('/')} recalc on change`}</span>
             </div>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12}}>
-              <div style={fg}>
-                <label style={lbl}>KSA (SAR) <span style={{color:form.ksa_overridden?t.amber:t.t4}}>{form.ksa_overridden?'overridden':'auto-suggested'}</span></label>
-                <div style={{display:'flex',gap:8}}>
-                  <input {...I('msrp_sar')} type="text" inputMode="decimal" readOnly={!form.ksa_overridden}
-                    style={{...inp(hasVal(form.msrp_sar),false),flex:1,color:form.ksa_overridden?t.t1:t.t3,borderColor:form.ksa_overridden?'rgba(245,166,35,0.4)':t.b2}}
-                  />
-                  <button style={{...btnG,...btnSm,color:form.ksa_overridden?t.amber:t.t4}} onClick={()=>set('ksa_overridden',!form.ksa_overridden)}>
-                    {form.ksa_overridden?'Revert':'Override'}
-                  </button>
+            <div style={{display:'grid',gridTemplateColumns:DERIVED.map(()=>'1fr').join(' '),gap:12}}>
+              {DERIVED.map(m=>(
+                <div key={m.key} style={fg}>
+                  <label style={lbl}>{m.short} ({m.currency}) <span style={{color:form[m.flag]?t.amber:t.t4}}>{form[m.flag]?'overridden':'auto-suggested'}</span></label>
+                  <div style={{display:'flex',gap:8}}>
+                    <input {...I(m.price)} type="text" inputMode="decimal" readOnly={!form[m.flag]}
+                      style={{...inp(hasVal(form[m.price]),false),flex:1,color:form[m.flag]?t.t1:t.t3,borderColor:form[m.flag]?'rgba(245,166,35,0.4)':t.b2}}
+                    />
+                    <button style={{...btnG,...btnSm,color:form[m.flag]?t.amber:t.t4}} onClick={()=>set(m.flag,!form[m.flag])}>
+                      {form[m.flag]?'Revert':'Override'}
+                    </button>
+                  </div>
+                  <span style={sub}>{m.rule}</span>
                 </div>
-                <span style={sub}>UAE ex-VAT × {KSA_FACTOR} (to SAR) × 1.15 VAT</span>
-              </div>
-              <div style={fg}>
-                <label style={lbl}>QAT (QAR) <span style={{color:form.qat_overridden?t.amber:t.t4}}>{form.qat_overridden?'overridden':'auto-suggested'}</span></label>
-                <div style={{display:'flex',gap:8}}>
-                  <input {...I('msrp_qat')} type="text" inputMode="decimal" readOnly={!form.qat_overridden}
-                    style={{...inp(hasVal(form.msrp_qat),false),flex:1,color:form.qat_overridden?t.t1:t.t3,borderColor:form.qat_overridden?'rgba(245,166,35,0.4)':t.b2}}
-                  />
-                  <button style={{...btnG,...btnSm,color:form.qat_overridden?t.amber:t.t4}} onClick={()=>set('qat_overridden',!form.qat_overridden)}>
-                    {form.qat_overridden?'Revert':'Override'}
-                  </button>
-                </div>
-                <span style={sub}>UAE × 1.01 formula</span>
-              </div>
-              <div style={fg}>
-                <label style={lbl}>KWT (KWD) <span style={{color:form.kwd_overridden?t.amber:t.t4}}>{form.kwd_overridden?'overridden':'auto-suggested'}</span></label>
-                <div style={{display:'flex',gap:8}}>
-                  <input {...I('msrp_kwd')} type="text" inputMode="decimal" readOnly={!form.kwd_overridden}
-                    style={{...inp(hasVal(form.msrp_kwd),false),flex:1,color:form.kwd_overridden?t.t1:t.t3,borderColor:form.kwd_overridden?'rgba(245,166,35,0.4)':t.b2}}
-                  />
-                  <button style={{...btnG,...btnSm,color:form.kwd_overridden?t.amber:t.t4}} onClick={()=>set('kwd_overridden',!form.kwd_overridden)}>
-                    {form.kwd_overridden?'Revert':'Override'}
-                  </button>
-                </div>
-                <span style={sub}>UAE ex-VAT × {KWD_FACTOR} (to KWD) · Kuwait rounding · no VAT</span>
-              </div>
+              ))}
             </div>
           </div>
         </div>
@@ -780,10 +731,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
           {key:'customs_duty_rate',   label:'Customs duty',    fmt:v=>v!=null?`${v}%`:'—'},
           {key:'msrp_primary_ex_vat', label:'Primary MSRP ex', fmt:v=>v!=null?`${it.msrp_primary_currency} ${Number(v).toLocaleString()}`:'—'},
           {key:'msrp_primary_inc_vat',label:'Primary MSRP inc',fmt:v=>v!=null?`${it.msrp_primary_currency} ${Number(v).toLocaleString()}`:'—'},
-          {key:'msrp_aed',            label:'UAE price',       fmt:v=>v!=null?`AED ${Number(v).toLocaleString()}`:'—'},
-          {key:'msrp_sar',            label:'KSA price',       fmt:v=>v!=null?`SAR ${Number(v).toLocaleString()}`:'—'},
-          {key:'msrp_qat',            label:'QAT price',       fmt:v=>v!=null?`QAR ${Number(v).toLocaleString()}`:'—'},
-          {key:'msrp_kwd',            label:'KWT price',       fmt:v=>money(v,'KWD')},
+          ...MARKETS.map(mk=>({key:mk.price, label:`${mk.short} price`, fmt:v=>money(v,mk.currency)})),
           {key:'price_used',          label:'Price used',      fmt:v=>PRICE_USED_OPTIONS.find(o=>o.value===v)?.label||v||'—'},
           {key:'target_margin_pct',   label:'Target margin',   fmt:v=>v!=null?v+'%':'—'},
           {key:'price_source',        label:'Price source',    fmt:v=>v||'—'},
@@ -841,10 +789,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
                   )}
                   <div style={{height:1,background:t.b2,margin:'16px 0'}}/>
                   <div style={{fontSize:11,color:t.t4,fontFamily:'var(--font-mono)',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:12}}>Recalculated outputs</div>
-                  {[['UAE price',money(it.msrp_aed,'AED'),t.t1],
-                    ['KSA price',money(it.msrp_sar,'SAR'),t.t1],
-                    ['QAT price',money(it.msrp_qat,'QAR'),t.t1],
-                    ['KWT price',money(it.msrp_kwd,'KWD'),t.t1],
+                  {[...MARKETS.map(mk=>[`${mk.short} price`,money(it[mk.price],mk.currency),t.t1]),
                     ['Landed cost',money(m?.landed_cost_aed,'AED',2),t.t2],
                   ].map(([label,val,color])=>(
                     <div key={label} style={{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:`1px solid ${t.b1}`,fontSize:13}}>
@@ -852,7 +797,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
                       <span style={{color,fontFamily:'var(--font-mono)',fontSize:12}}>{val}</span>
                     </div>
                   ))}
-                  {m&&[['UAE margin',m.uae_margin],['KSA margin',m.ksa_margin],['QAT margin',m.qat_margin],['KWT margin',m.kwd_margin]].map(([label,mg])=>{
+                  {m&&MARKETS.map(mk=>[`${mk.short} margin`,m[mk.margin]]).map(([label,mg])=>{
                     const fmt=formatMargin(mg);
                     return(
                       <div key={label} style={{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:`1px solid ${t.b1}`,fontSize:13}}>
@@ -878,10 +823,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
                     </div>
                   ))}
                   <div style={{height:1,background:t.b2,margin:'16px 0'}}/>
-                  {[['UAE price',money(it.msrp_aed,'AED'),t.t1],
-                    ['KSA price',money(it.msrp_sar,'SAR'),t.t1],
-                    ['QAT price',money(it.msrp_qat,'QAR'),t.t1],
-                    ['KWT price',money(it.msrp_kwd,'KWD'),t.t1],
+                  {[...MARKETS.map(mk=>[`${mk.short} price`,money(it[mk.price],mk.currency),t.t1]),
                     ['Landed cost',money(m?.landed_cost_aed,'AED',2),t.t2],
                   ].map(([label,val,color])=>(
                     <div key={label} style={{display:'flex',justifyContent:'space-between',padding:'9px 0',borderBottom:`1px solid ${t.b1}`,fontSize:14}}>
@@ -889,7 +831,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
                       <span style={{color,fontFamily:'var(--font-mono)',fontSize:13}}>{val}</span>
                     </div>
                   ))}
-                  {m&&[['UAE margin',m.uae_margin],['KSA margin',m.ksa_margin],['QAT margin',m.qat_margin],['KWT margin',m.kwd_margin]].map(([label,mg])=>{
+                  {m&&MARKETS.map(mk=>[`${mk.short} margin`,m[mk.margin]]).map(([label,mg])=>{
                     const fmt=formatMargin(mg);
                     return(
                       <div key={label} style={{display:'flex',justifyContent:'space-between',padding:'9px 0',borderBottom:`1px solid ${t.b1}`,fontSize:14}}>

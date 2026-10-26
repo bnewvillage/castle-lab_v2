@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx-js-style';
 import { toNum, money } from '../../lib/num';
 import { fetchBrands, fetchRates, bulkSaveItems, checkExisting, fetchItemsByCodes } from '../../lib/db';
 import { resolvePriceUsed } from '../../lib/pricing';
+import { DERIVED, PRICE_COLUMNS } from '../../lib/markets';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, groupBox, groupHead, CURRENCIES } from './styles';
 import { useAuth } from '../../lib/AuthContext';
 import BrandSelect from './BrandSelect';
@@ -483,7 +484,7 @@ export default function BulkUpload({ onToast }) {
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
               <thead>
                 <tr style={{ background:t.bg3, borderBottom:`1px solid ${t.b2}` }}>
-                  {['Item code','Item name','UAE price','KSA price','QAT price','KWT price','EXW cost','Action'].map(h=>(
+                  {['Item code','Item name','UAE price',...DERIVED.map(m=>`${m.short} price`),'EXW cost','Action'].map(h=>(
                     <th key={h} style={{ padding:'9px 14px', textAlign:'left', fontSize:11, color:t.t2, fontFamily:'var(--font-mono)', textTransform:'uppercase', letterSpacing:'0.05em', fontWeight:600, whiteSpace:'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -497,9 +498,9 @@ export default function BulkUpload({ onToast }) {
                       <td style={{ padding:'10px 14px', fontSize:13, color:t.blue, fontFamily:'var(--font-mono)', fontWeight:500 }}>{row.item_code}</td>
                       <td style={{ padding:'10px 14px', fontSize:13, color:t.t2 }} title={row.item_name}>{row.item_name?.length>28?row.item_name.slice(0,28)+'…':row.item_name}</td>
                       <td style={{ padding:'10px 14px', fontSize:13, color:t.t1, fontFamily:'var(--font-mono)' }}>{row.msrp_aed?`AED ${fmtNum(row.msrp_aed)}`:'—'}</td>
-                      <td style={{ padding:'10px 14px', fontSize:13, color:t.t2, fontFamily:'var(--font-mono)' }}>{row.msrp_sar?`SAR ${fmtNum(row.msrp_sar)}`:'—'}</td>
-                      <td style={{ padding:'10px 14px', fontSize:13, color:t.t2, fontFamily:'var(--font-mono)' }}>{row.msrp_qat?`QAR ${fmtNum(row.msrp_qat)}`:'—'}</td>
-                      <td style={{ padding:'10px 14px', fontSize:13, color:t.t2, fontFamily:'var(--font-mono)' }}>{row.msrp_kwd?money(row.msrp_kwd, 'KWD'):'—'}</td>
+                      {DERIVED.map(m=>(
+                        <td key={m.key} style={{ padding:'10px 14px', fontSize:13, color:t.t2, fontFamily:'var(--font-mono)' }}>{row[m.price]?money(row[m.price], m.currency):'—'}</td>
+                      ))}
                       <td style={{ padding:'10px 14px', fontSize:13, color:t.t2, fontFamily:'var(--font-mono)' }}>{row.exw_cost?`${row.cost_currency} ${fmtNum(row.exw_cost)}`:'—'}</td>
                       <td style={{ padding:'10px 14px' }}>
                         <div style={{ display:'flex', gap:6 }}>
@@ -622,7 +623,7 @@ export default function BulkUpload({ onToast }) {
           <table style={{ width:'100%', borderCollapse:'collapse' }}>
             <thead>
               <tr style={{ background:t.bg3, borderBottom:`1px solid ${t.b2}` }}>
-                {['Row','Status','Item code','Item name','Brand','Cost curr.','MSRP curr.','Price used','Margin %','MSRP value','→ UAE','→ KSA','→ QAT','→ KWT','EXW cost','Cost src.','Price src.',''].map(h=>(
+                {['Row','Status','Item code','Item name','Brand','Cost curr.','MSRP curr.','Price used','Margin %','MSRP value','→ UAE',...DERIVED.map(m=>`→ ${m.short}`),'EXW cost','Cost src.','Price src.',''].map(h=>(
                   <th key={h} style={{ padding:'10px 14px', textAlign:'left', fontSize:11, color:t.t2, fontFamily:'var(--font-mono)', textTransform:'uppercase', letterSpacing:'0.05em', whiteSpace:'nowrap', fontWeight:600 }}>{h}</th>
                 ))}
               </tr>
@@ -711,9 +712,9 @@ export default function BulkUpload({ onToast }) {
                       <td style={{ padding:'8px 14px' }}>{row.price_used==='cost_based'?<InlineEdit field="target_margin_pct"/>:<span style={{ fontSize:13, color:t.t4 }}>—</span>}</td>
                       <td style={{ padding:'8px 14px', fontSize:13, color:t.t2, whiteSpace:'nowrap' }}>{priceVal?`${priceCurr} ${fmtNum(priceVal)}`:'—'}</td>
                       <td style={{ padding:'8px 14px', fontSize:13, color:t.green, fontWeight:500, whiteSpace:'nowrap', textAlign:'right' }}>{row.msrp_aed?`AED ${fmtNum(row.msrp_aed)}`:'—'}</td>
-                      <td style={{ padding:'8px 14px', fontSize:13, color:t.t2, whiteSpace:'nowrap', textAlign:'right' }}>{row.msrp_sar?`SAR ${fmtNum(row.msrp_sar)}`:'—'}</td>
-                      <td style={{ padding:'8px 14px', fontSize:13, color:t.t2, whiteSpace:'nowrap', textAlign:'right' }}>{row.msrp_qat?`QAR ${fmtNum(row.msrp_qat)}`:'—'}</td>
-                      <td style={{ padding:'8px 14px', fontSize:13, color:t.t2, whiteSpace:'nowrap', textAlign:'right' }}>{row.msrp_kwd?money(row.msrp_kwd, 'KWD'):'—'}</td>
+                      {DERIVED.map(m=>(
+                        <td key={m.key} style={{ padding:'8px 14px', fontSize:13, color:t.t2, whiteSpace:'nowrap', textAlign:'right' }}>{row[m.price]?money(row[m.price], m.currency):'—'}</td>
+                      ))}
                       <td style={{ padding:'8px 14px', fontSize:13, color:t.t2, whiteSpace:'nowrap' }}>{row.exw_cost?`${row.cost_currency} ${fmtNum(row.exw_cost)}`:'—'}</td>
                       <td style={{ padding:'8px 14px' }}><InlineEdit field="cost_source"/></td>
                       <td style={{ padding:'8px 14px' }}><InlineEdit field="price_source"/></td>
@@ -852,7 +853,7 @@ export default function BulkUpload({ onToast }) {
 
       <div style={groupBox(false)}>
         <div style={{ ...groupHead, marginBottom:14 }}>
-          Expected columns <span style={{ color:t.t4, fontWeight:400, textTransform:'none', letterSpacing:0, fontSize:11 }}>· * = required · do not include msrp_aed / msrp_sar / msrp_qat / msrp_kwd — prices are calculated on import</span>
+          Expected columns <span style={{ color:t.t4, fontWeight:400, textTransform:'none', letterSpacing:0, fontSize:11 }}>· * = required · do not include {PRICE_COLUMNS.join(' / ')} — prices are calculated on import</span>
         </div>
         <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
           {[

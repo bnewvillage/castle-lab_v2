@@ -4,6 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { groupOf } from '../components/navConfig';
 import { fetchRates, fetchBrands } from '../lib/db';
 import { t } from './pricing/styles';
+import { MARKETS_IN_WORDS } from '../lib/markets';
 import { IconRefresh, IconMaximize, IconMinimize, IconDownload } from '../components/icons';
 import Toast        from './pricing/Toast';
 import SingleSKU    from './pricing/SingleSKU';
@@ -15,7 +16,7 @@ import ProjectItems from './pricing/ProjectItems';
 import BulkEdit     from './pricing/BulkEdit';
 
 const MODULES = {
-  single:   { label: 'Single SKU',    description: 'Create and edit items with live margin calculations across UAE, KSA and Qatar.' },
+  single:   { label: 'Single SKU',    description: `Create and edit items with live margin calculations across ${MARKETS_IN_WORDS}.` },
   bulk:     { label: 'Bulk Import',   description: 'Create or update items from Excel or pasted columns, with validation and change previews.' },
   edit:     { label: 'Bulk Edit',     description: 'Override prices, rename codes or delete items by pasted item code.' },
   list:     { label: 'Item List',     description: 'Browse, filter and export the pricing master with computed margins.' },

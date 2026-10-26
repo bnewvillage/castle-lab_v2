@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { fetchItemList, fetchHistory, deleteItem } from '../../lib/db';
 import { calcAllMargins, calcEmployeePrice, formatMargin, MARGIN_COLORS, resolvePriceUsed } from '../../lib/pricing';
 import { money } from '../../lib/num';
+import { MARKETS, PRICE_COLUMNS } from '../../lib/markets';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, PRICE_USED_OPTIONS } from './styles';
 import { useAuth } from '../../lib/AuthContext';
 import BrandSelect from './BrandSelect';
@@ -104,7 +105,7 @@ function InlineSummary({ item, rates }) {
   const emp     = calcEmployeePrice(item, rates);
 
   const lastFor = (keys) => history.find(h => keys.some(k => h[`new_${k}`]!=null));
-  const lastPrice = lastFor(['msrp_aed','msrp_sar','msrp_qat','msrp_kwd','msrp_primary_ex_vat','msrp_primary_inc_vat','msrp_secondary_ex_vat','msrp_secondary_inc_vat']);
+  const lastPrice = lastFor([...PRICE_COLUMNS,'msrp_primary_ex_vat','msrp_primary_inc_vat','msrp_secondary_ex_vat','msrp_secondary_inc_vat']);
   const lastCost  = lastFor(['exw_cost']);
   const lastRules = lastFor(['shipping_rate','customs_duty_rate','price_used']);
   const recent    = history.slice(0,2);
@@ -124,12 +125,7 @@ function InlineSummary({ item, rates }) {
               <div style={{ fontSize:10, color:t.blue, fontFamily:'var(--font-mono)', textTransform:'uppercase', letterSpacing:'0.1em', marginBottom:14, fontWeight:600 }}>
                 Current pricing
               </div>
-              {[
-                ['UAE', money(item.msrp_aed, 'AED'), margins?.uae_margin],
-                ['KSA', money(item.msrp_sar, 'SAR'), margins?.ksa_margin],
-                ['QAT', money(item.msrp_qat, 'QAR'), margins?.qat_margin],
-                ['KWT', money(item.msrp_kwd, 'KWD'), margins?.kwd_margin],
-              ].map(([country, price, margin]) => {
+              {MARKETS.map(mk => [mk.short, money(item[mk.price], mk.currency), margins?.[mk.margin]]).map(([country, price, margin]) => {
                 const m = formatMargin(margin);
                 return (
                   <div key={country} style={rowStyle}>
@@ -201,10 +197,7 @@ function InlineSummary({ item, rates }) {
                 const pu = puMap[item.price_used] ?? puMap.primary_ex_vat;
                 const changes = [
                   ['EXW cost',  h.old_exw_cost,       h.new_exw_cost,       null, null],
-                  ['UAE price', h.old_msrp_aed,        h.new_msrp_aed,       null, null],
-                  ['KSA price', h.old_msrp_sar,        h.new_msrp_sar,       null, null],
-                  ['QAT price', h.old_msrp_qat,        h.new_msrp_qat,       null, null],
-                  ['KWT price', h.old_msrp_kwd,        h.new_msrp_kwd,       null, null],
+                  ...MARKETS.map(mk => [`${mk.short} price`, h[`old_${mk.price}`], h[`new_${mk.price}`], null, null]),
                   [pu.label,    h[pu.old],             h[pu.new],            null, null],
                   ['Ship %',    h.old_shipping_rate,   h.new_shipping_rate,  null, null],
                   ['Duty %',    h.old_customs_duty_rate, h.new_customs_duty_rate, null, null],
@@ -264,10 +257,7 @@ const LIST_COLUMNS = [
   { label:'Price curr.', key:null,                minWidth:90 },
   { label:'EXW cost',    key:'exw_cost',          minWidth:110, align:'right' },
   { label:'Cost curr.',  key:'cost_currency',     minWidth:90 },
-  { label:'UAE price',   key:'msrp_aed',          minWidth:130, align:'right' },
-  { label:'KSA price',   key:'msrp_sar',          minWidth:130, align:'right' },
-  { label:'QAT price',   key:'msrp_qat',          minWidth:130, align:'right' },
-  { label:'KWT price',   key:'msrp_kwd',          minWidth:130, align:'right' },
+  ...MARKETS.map(m => ({ label:`${m.short} price`, key:m.price, minWidth:130, align:'right' })),
   { label:'Ship %',      key:'shipping_rate',     minWidth:80,  align:'right' },
   { label:'Duty %',      key:'customs_duty_rate', minWidth:80,  align:'right' },
   { label:'Landed cost', key:null,                minWidth:130, align:'right' },
@@ -351,7 +341,7 @@ export default function ItemList({ rates, brands, onEditItem, maximized, setExpo
   const handleSort = (col) => {
     const nextDir = sortCol === col
       ? (sortDir === 'asc' ? 'desc' : 'asc')
-      : (['created_at','updated_at','exw_cost','msrp_aed','msrp_sar','msrp_qat','msrp_kwd'].includes(col) ? 'desc' : 'asc');
+      : (['created_at','updated_at','exw_cost',...PRICE_COLUMNS].includes(col) ? 'desc' : 'asc');
     setSortCol(col); setSortDir(nextDir);
     setExpanded(new Set());
     loadItems(0, col, nextDir);
@@ -514,10 +504,7 @@ export default function ItemList({ rates, brands, onEditItem, maximized, setExpo
                         <td style={{ ...td(false), color:t.t3 }}>{msrp.currency||'—'}</td>
                         <td style={{ ...td(false), textAlign:'right' }}>{fmtNum(item.exw_cost)}</td>
                         <td style={{ ...td(false), color:t.t3 }}>{item.cost_currency||'—'}</td>
-                        <td style={{ ...td(true), textAlign:'right' }}>{money(item.msrp_aed, 'AED')}</td>
-                        <td style={{ ...td(false), textAlign:'right' }}>{money(item.msrp_sar, 'SAR')}</td>
-                        <td style={{ ...td(false), textAlign:'right' }}>{money(item.msrp_qat, 'QAR')}</td>
-                        <td style={{ ...td(false), textAlign:'right' }}>{money(item.msrp_kwd, 'KWD')}</td>
+                        {MARKETS.map((mk, i) => <td key={mk.key} style={{ ...td(i === 0), textAlign:'right' }}>{money(item[mk.price], mk.currency)}</td>)}
                         <td style={{ ...td(false), textAlign:'right', color:t.t3 }}>{item.shipping_rate??'—'}</td>
                         <td style={{ ...td(false), textAlign:'right', color:t.t3 }}>{item.customs_duty_rate??'—'}</td>
                         <td style={{ ...td(false), textAlign:'right' }}>{money(landed, 'AED', 2)}</td>

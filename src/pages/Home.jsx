@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
+import { MARKETS, MARKETS_IN_WORDS } from '../lib/markets';
 import { IconLayers, IconPercent, IconFileExport } from '../components/icons';
 
 const fadeUp = (delay = 0) => ({
@@ -18,7 +19,7 @@ const FEATURES = [
   {
     icon: IconPercent,
     title: 'Margin control',
-    text: 'Enforced target margins, brand markup rules and live margin visibility across UAE, KSA and Qatar.',
+    text: `Enforced target margins, brand markup rules and live margin visibility across ${MARKETS_IN_WORDS}.`,
   },
   {
     icon: IconFileExport,
@@ -92,7 +93,7 @@ export default function Home() {
         <div style={{ height: 120, background: 'linear-gradient(transparent, var(--bg-0))', pointerEvents: 'none' }} />
         <div className="container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 24px', borderTop: '1px solid var(--border-1)', position: 'relative' }}>
           <span style={{ fontSize: 11.5, color: 'var(--text-4)' }}>© {new Date().getFullYear()} castillo.lab — All rights reserved.</span>
-          <span style={{ fontSize: 11, color: 'var(--text-4)', fontFamily: 'var(--font-mono)', letterSpacing: '0.05em' }}>UAE · KSA · QAT</span>
+          <span style={{ fontSize: 11, color: 'var(--text-4)', fontFamily: 'var(--font-mono)', letterSpacing: '0.05em' }}>{MARKETS.map(m => m.short).join(' · ')}</span>
         </div>
       </div>
 

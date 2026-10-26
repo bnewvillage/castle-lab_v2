@@ -4,6 +4,9 @@ import { fetchPriceHistoryBatches, fetchBatchItems, fetchAllBatchItems, rollback
 import { useAuth } from '../../lib/AuthContext';
 import { t, btnW, btnG, groupBox } from './styles';
 import { downloadCSV } from '../../lib/csvExport';
+import { MARKETS, recalcLabel } from '../../lib/markets';
+
+const RECALC_OPS = MARKETS.filter(m => m.recalcOp);
 
 const OP_LABELS = {
   global_markup:  'Global Markup',
@@ -11,8 +14,7 @@ const OP_LABELS = {
   bulk_import:    'Bulk Import',
   markup_change:  'Markup Change',
   rounding_rule:  'Rounding Rule',
-  ksa_recalc:     'KSA Recalculation',
-  kwd_recalc:     'Kuwait Recalculation',
+  ...Object.fromEntries(RECALC_OPS.map(m => [m.recalcOp, recalcLabel(m)])),
 };
 
 const OP_COLORS = {
@@ -21,24 +23,23 @@ const OP_COLORS = {
   bulk_import:   t.green,
   markup_change: '#c084fc',
   rounding_rule: t.green,
-  ksa_recalc:    t.blue,
-  kwd_recalc:    t.blue,
+  ...Object.fromEntries(RECALC_OPS.map(m => [m.recalcOp, t.blue])),
 };
 
-function fmt(val) {
+function fmt(val, dp) {
   if (val == null) return <span style={{ color: t.t4 }}>—</span>;
-  return Number(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return Number(val).toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
 }
 
-function DiffCell({ old: o, new: n }) {
+function DiffCell({ old: o, new: n, dp }) {
   if (o == null && n == null) return <span style={{ color: t.t4 }}>—</span>;
   const changed = o !== n;
   return (
     <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>
-      <span style={{ color: t.t4 }}>{fmt(o)}</span>
+      <span style={{ color: t.t4 }}>{fmt(o, dp)}</span>
       {changed && <>
         <span style={{ color: t.t4, margin: '0 4px' }}>→</span>
-        <span style={{ color: t.amber, fontWeight: 500 }}>{fmt(n)}</span>
+        <span style={{ color: t.amber, fontWeight: 500 }}>{fmt(n, dp)}</span>
       </>}
     </span>
   );
@@ -151,7 +152,7 @@ function BatchCard({ batch, isViewer, user, onRollbackDone }) {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr>
-                    {['Item code', 'Brand', 'AED', 'SAR', 'QAT', 'KWD'].map(h => (
+                    {['Item code', 'Brand', ...MARKETS.map(m => m.currency)].map(h => (
                       <th key={h} style={{ padding: '8px 14px', textAlign: h === 'Item code' || h === 'Brand' ? 'left' : 'right', fontSize: 10, color: t.t4, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: `1px solid ${t.b1}`, background: t.bg3, whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
@@ -161,10 +162,9 @@ function BatchCard({ batch, isViewer, user, onRollbackDone }) {
                     <tr key={item.item_code} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)' }}>
                       <td style={{ padding: '7px 14px', color: t.blue, fontFamily: 'var(--font-mono)', fontSize: 12 }}>{item.item_code}</td>
                       <td style={{ padding: '7px 14px', color: t.t3, fontSize: 12 }}>{item.brand_code ?? '—'}</td>
-                      <td style={{ padding: '7px 14px', textAlign: 'right' }}><DiffCell old={item.old_msrp_aed} new={item.new_msrp_aed} /></td>
-                      <td style={{ padding: '7px 14px', textAlign: 'right' }}><DiffCell old={item.old_msrp_sar} new={item.new_msrp_sar} /></td>
-                      <td style={{ padding: '7px 14px', textAlign: 'right' }}><DiffCell old={item.old_msrp_qat} new={item.new_msrp_qat} /></td>
-                      <td style={{ padding: '7px 14px', textAlign: 'right' }}><DiffCell old={item.old_msrp_kwd} new={item.new_msrp_kwd} /></td>
+                      {MARKETS.map(m => (
+                        <td key={m.key} style={{ padding: '7px 14px', textAlign: 'right' }}><DiffCell old={item[`old_${m.price}`]} new={item[`new_${m.price}`]} dp={m.dp} /></td>
+                      ))}
                     </tr>
                   ))}
                 </tbody>

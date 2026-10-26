@@ -6,13 +6,7 @@
 // without any credentials or network access.
 // ─────────────────────────────────────────────────────────────
 import { store } from './demoData';
-
-// Report name → { currency, price_list } used in the ERP.
-function meta(reportName = '') {
-  if (reportName.includes('SAR')) return { currency: 'SAR', price_list: 'KSA Retail' };
-  if (reportName.includes('QAR')) return { currency: 'QAR', price_list: 'QAT Retail' };
-  return { currency: 'AED', price_list: 'UAE Retail' };
-}
+import { MARKETS, UAE } from '../lib/markets';
 
 // A few codes that exist in ERP but not in the demo catalogue,
 // so the "no price / no match" stats are non-zero and realistic.
@@ -24,8 +18,10 @@ export function demoErpReport(reportName) {
   if (/KWD/.test(reportName)) {
     return new Promise((_, reject) => setTimeout(() => reject(new Error('Report not found in the ERP')), 200));
   }
-  const { currency, price_list } = meta(reportName);
-  const field = currency === 'SAR' ? 'msrp_sar' : currency === 'QAR' ? 'msrp_qat' : 'msrp_aed';
+  // The market whose price list this is.
+  const m = MARKETS.find(mk => mk.report === reportName) ?? UAE;
+  const { currency, price: field } = m;
+  const price_list = `${m.short} Retail`;
 
   const rows = store.pricingMaster.map(it => ({
     name: `${it.item_code}-${price_list.replace(/\s/g, '')}`,

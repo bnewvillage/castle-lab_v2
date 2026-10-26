@@ -5,10 +5,11 @@ import { t } from './pricing/styles';
 import { IconDownload } from '../components/icons';
 import { groupOf } from '../components/navConfig';
 import { DEMO } from '../demo/demoConfig';
-import ERPAutomation from './others/ERPAutomation';
+import PriceLists from './others/erp/PriceLists';
+import CatalogueChecks from './others/erp/CatalogueChecks';
 import CostLookup from './others/CostLookup';
 import GlobalMarkupExport from './others/GlobalMarkupExport';
-import PriceRounding from './others/PriceRounding';
+import PriceRules from './others/PriceRules';
 import PurchaseOrder from './others/PurchaseOrder';
 
 const MODULES = {
@@ -16,7 +17,7 @@ const MODULES = {
   'erp-checks':    { label: 'Catalogue Checks', description: 'The catalogue against the ERP: items missing on either side, and items no price list covers.' },
   'cost-lookup':   { label: 'Cost Lookup',    description: 'Paste a list of item codes and get their EXW costs back.' },
   'global-markup': { label: 'Global Markup',  description: 'Apply and export portfolio-wide markup adjustments.' },
-  'rounding':      { label: 'Price Rounding', description: 'Move stored prices onto the current rules — rounding, and KSA from UAE — with a preview and one-step rollback.' },
+  'rounding':      { label: 'Price Rules',    description: 'The rules every price is made by, and recalculating a market from UAE with a preview and one-step rollback.' },
   'purchase-order': { label: 'Purchase Order', description: "Build a PO from the ERP's open purchase requests or from pasted item codes, and download the items file to upload to the ERP." },
 };
 
@@ -66,12 +67,12 @@ export default function OthersMaster() {
         <AnimatePresence mode="wait">
           {tab === 'erp-export' && (
             <motion.div key="erp" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
-              <ERPAutomation view="prices" creds={erpCreds} setCreds={setErpCreds} />
+              <PriceLists creds={erpCreds} setCreds={setErpCreds} />
             </motion.div>
           )}
           {tab === 'erp-checks' && (
             <motion.div key="erpc" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
-              <ERPAutomation view="checks" creds={erpCreds} setCreds={setErpCreds} />
+              <CatalogueChecks creds={erpCreds} setCreds={setErpCreds} />
             </motion.div>
           )}
           {tab === 'cost-lookup' && (
@@ -91,7 +92,7 @@ export default function OthersMaster() {
           )}
           {tab === 'rounding' && (
             <motion.div key="rnd" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
-              <PriceRounding />
+              <PriceRules />
             </motion.div>
           )}
         </AnimatePresence>

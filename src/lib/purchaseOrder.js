@@ -14,7 +14,7 @@
 // from the ERP, written in the ERP's full PO item format so each line keeps
 // its link back to the request.
 // ─────────────────────────────────────────────────────────────
-import { toNum } from './num';
+import { toNum, round } from './num';
 import { REQUEST_PO_HEADER } from './erpPoTemplate';
 
 export const DEFAULT_UOM = 'Nos';
@@ -112,8 +112,6 @@ export const NAME_SHORTENED = `name shortened to ${ERP_TEXT_MAX} characters for 
 
 // ── Building PO lines from the database ──────────────────────
 
-const round2 = (v) => Math.round(v * 100) / 100;
-
 /**
  * One PO line per pasted line, matched to pricing_master case-insensitively.
  *
@@ -146,7 +144,7 @@ export function buildPoLines(input, itemsByCode) {
       brand:     item?.brand_code ?? '',
       currency:  item?.cost_currency ?? '',
       qty, rate,
-      amount:    qty != null && rate != null ? round2(qty * rate) : null,
+      amount:    qty != null && rate != null ? round(qty * rate) : null,
       date,                                  // a per-line override; empty uses the default
       errors,
       warnings:  [],
@@ -180,7 +178,7 @@ export function mergeDuplicates(rows) {
     }
     const m = out[at[k]];
     m.qty += r.qty;
-    m.amount = round2(m.qty * m.rate);
+    m.amount = round(m.qty * m.rate);
   }
   return out;
 }
@@ -194,7 +192,7 @@ const cell = (v) => {
 
 // The rate as stored — some EXW costs carry 3 decimals — without float noise
 // (49.8, not 49.800000001) or thousands separators.
-const rateCell = (v) => (v == null ? '' : String(parseFloat(v.toFixed(6))));
+const rateCell = (v) => (v == null ? '' : String(round(v, 6)));
 
 /**
  * The CSV text for the PO's lines, CRLF line endings, as the template. Lines
@@ -228,7 +226,7 @@ export function poCsv(rows, defaultDate) {
 
 export const REQUEST_PO_FIELDS = REQUEST_PO_HEADER.split('\r\n')[2].split(',');
 
-const num = (v) => (v == null ? '' : String(parseFloat(Number(v).toFixed(6))));
+const num = (v) => (v == null ? '' : String(round(v, 6)));
 
 // Castle-lab item codes are BRAND-SKU, and the SKU is the supplier's part
 // number (SWMT-SBL.06.593.10002/B → SBL.06.593.10002/B), which the ERP's own
@@ -253,7 +251,7 @@ export function prepareRequestLines(erpLines, itemsByCode) {
       ...l,
       item,
       // A PO line's rate is per ITS unit: a box of 6 costs 6 pieces.
-      rate:      unit == null ? null : parseFloat((unit * cf).toFixed(6)),
+      rate:      unit == null ? null : round(unit * cf, 6),
       unit_rate: unit,
       currency: item?.cost_currency ?? '',
       qty:      l.outstanding_qty,
@@ -319,7 +317,7 @@ export function requestPoCsv(rows, defaultDate) {
         conversion_factor:      num(cf),
         stock_qty:              num(qty * cf),
         rate:                   rateCell(r.rate),
-        amount:                 (Math.round(qty * r.rate * 100) / 100).toFixed(2),
+        amount:                 round(qty * r.rate).toFixed(2),
         apply_tds:              1,
         warehouse:              r.warehouse,
         material_request:       r.request_id,

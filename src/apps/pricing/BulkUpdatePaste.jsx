@@ -3,6 +3,7 @@ import { toNum } from '../../lib/num';
 import * as XLSX from 'xlsx-js-style';
 import { fetchBrands, fetchRates, fetchItemsByCodes, bulkUpdateItemFields } from '../../lib/db';
 import { calcMSRPs, calcCostBasedMSRPs, DEFAULT_COST_MARGIN_PCT, resolvePriceUsed } from '../../lib/pricing';
+import { MARKETS } from '../../lib/markets';
 import { t, inp, sel, btnW, btnG, lbl, groupBox, groupHead, CURRENCIES } from './styles';
 import BrandSelect from './BrandSelect';
 
@@ -33,13 +34,7 @@ const OPT_FIELDS = [
   { k:'target_margin_pct',     label:'Target margin %', num:true, ph:'25' },
 ];
 
-const PRICE_COLS = [
-  { k:'msrp_aed', label:'UAE price', flag:'uae_overridden' },
-  { k:'msrp_sar', label:'KSA price', flag:'ksa_overridden' },
-  { k:'msrp_qat', label:'QAT price', flag:'qat_overridden' },
-  { k:'msrp_kwd', label:'KWT price', flag:'kwd_overridden' },
-];
-const REAL_OF = { msrp_aed:'real_msrp_aed', msrp_sar:'real_msrp_sar', msrp_qat:'real_msrp_qat', msrp_kwd:'real_msrp_kwd' };
+const PRICE_COLS = MARKETS.map(m => ({ k: m.price, label: `${m.short} price`, flag: m.flag, real: m.real }));
 
 // Only these feed the price calculation. Editing a name or barcode must never
 // trigger a price rewrite off whatever happens to be stored.
@@ -184,7 +179,7 @@ export default function BulkUpdatePaste({ onToast, isViewer }) {
         }
 
         // Recalculate market prices from the merged row — a cost or MSRP change
-        // that did not flow through would leave msrp_aed/sar/qat stale.
+        // that did not flow through would leave the market prices stale.
         const merged = { ...row };
         for (const [k, v] of Object.entries(incoming)) merged[k] = isNumField(k) ? toNum(v) : v;
         const rule   = rules[row.brand_code] || {};
@@ -196,7 +191,7 @@ export default function BulkUpdatePaste({ onToast, isViewer }) {
             // would silently discard the override.
             if (row[pc.flag]) continue;
             if (!sameValue(row[pc.k], prices[pc.k], true)) {
-              diffs.push({ field:pc.k, from:row[pc.k], to:prices[pc.k], computed:true, real:prices[REAL_OF[pc.k]] });
+              diffs.push({ field:pc.k, from:row[pc.k], to:prices[pc.k], computed:true, realField:pc.real, real:prices[pc.real] });
             }
           }
         }
@@ -219,7 +214,7 @@ export default function BulkUpdatePaste({ onToast, isViewer }) {
         const patch = { item_code: c.item_code };
         for (const d of c.diffs) {
           patch[d.field] = d.to;
-          if (d.computed && REAL_OF[d.field]) patch[REAL_OF[d.field]] = d.real ?? null;
+          if (d.computed) patch[d.realField] = d.real ?? null;
         }
         return patch;
       });

@@ -10,7 +10,8 @@
 // backend for the length of a session. A page reload reseeds.
 // ─────────────────────────────────────────────────────────────
 import { calcMSRPs, calcCostBasedMSRPs, calcProjectPrice } from '../lib/pricing';
-import { legacyUaeShelf, legacyMarketShelf } from '../lib/rounding';
+import { MARKETS, PRICE_COLUMNS, REAL_COLUMNS, FLAG_COLUMNS, DERIVED, MARKET } from '../lib/markets';
+import { round } from '../lib/num';
 
 // ── Exchange rates (to AED) ───────────────────────────────────
 export const RATES = {
@@ -61,7 +62,6 @@ function makeRng(seed) {
   };
 }
 
-const pf2 = (v) => (v != null ? parseFloat(Number(v).toFixed(2)) : null);
 const pick = (rng, arr) => arr[Math.floor(rng() * arr.length)];
 
 function daysAgo(n) {
@@ -72,19 +72,9 @@ function daysAgo(n) {
 }
 
 // ── Build one brand's items ───────────────────────────────────
-// Prices an item with the rounding rule in force before Oct 2026, so the demo
-// catalogue has prices for Pricing → Price Rounding to move. Same pipeline
-// and multiplication order as the old pricing code.
-function legacyPrices(uaeShelfTarget, additional) {
-  const k = (aed) => pf2(legacyMarketShelf(aed * 1.03 * 1.15) / 1.15);
-  const q = (aed) => pf2(legacyMarketShelf(aed * 1.01));
-  const real = pf2(legacyUaeShelf(uaeShelfTarget) / 1.05);
-  const msrp = additional ? pf2(legacyUaeShelf(real * (1 + additional / 100) * 1.05) / 1.05) : real;
-  return {
-    real_msrp_aed: real, real_msrp_sar: k(real), real_msrp_qat: q(real),
-    msrp_aed: msrp, msrp_sar: k(msrp), msrp_qat: q(msrp),
-  };
-}
+// Every fourth item was saved before Kuwait launched and has no Kuwait price,
+// so Pricing → Price Rules has prices to fill.
+const preKuwait = (msrps) => msrps && { ...msrps, [MARKET.kwd.price]: null, [MARKET.kwd.real]: null };
 
 function buildBrandItems(def, rng) {
   const items = [];
@@ -99,7 +89,7 @@ function buildBrandItems(def, rng) {
     // EXW cost scaled per currency so JPY items aren't tiny.
     const base = cost_currency === 'JPY' ? 4000 + Math.floor(rng() * 26000)
                : 18 + Math.floor(rng() * 240);
-    const exw_cost = pf2(base);
+    const exw_cost = round(base);
     const shipping_rate = pick(rng, [0, 3, 5, 7.5]);
     const customs_duty_rate = pick(rng, [5, 5.5]);
 
@@ -128,9 +118,8 @@ function buildBrandItems(def, rng) {
       target_margin_pct: null,
       price_source: pick(rng, SOURCES),
       cost_source: pick(rng, SOURCES),
-      msrp_aed: null, msrp_sar: null, msrp_qat: null,
-      real_msrp_aed: null, real_msrp_sar: null, real_msrp_qat: null,
-      uae_overridden: false, ksa_overridden: false, qat_overridden: false,
+      ...Object.fromEntries([...PRICE_COLUMNS, ...REAL_COLUMNS].map(c => [c, null])),
+      ...Object.fromEntries(FLAG_COLUMNS.map(c => [c, false])),
       created_at: updated_at,
       updated_at,
       updated_by,
@@ -138,41 +127,37 @@ function buildBrandItems(def, rng) {
 
     if (costBased) {
       const target_margin_pct = pick(rng, [22, 25, 28, 30]);
-      const msrps = i % 4 === 0
-        ? legacyPrices(exw_cost * RATES[cost_currency] / (1 - target_margin_pct / 100) * 1.05, null)
-        : calcCostBasedMSRPs(exw_cost, cost_currency, target_margin_pct, RATES);
+      const msrps = calcCostBasedMSRPs(exw_cost, cost_currency, target_margin_pct, RATES);
       row = {
         ...row,
         price_used: 'cost_based',
         target_margin_pct,
-        ...(msrps || {}),
+        ...((i % 4 === 0 ? preKuwait(msrps) : msrps) || {}),
       };
     } else {
       // Vendor MSRP in the cost currency — comfortably above cost.
       const msrp_primary_currency = cost_currency;
-      const msrp_primary_ex_vat = pf2(exw_cost * (1.9 + rng() * 0.9));
-      const msrp_primary_inc_vat = pf2(msrp_primary_ex_vat * 1.2);
+      const msrp_primary_ex_vat = round(exw_cost * (1.9 + rng() * 0.9));
+      const msrp_primary_inc_vat = round(msrp_primary_ex_vat * 1.2);
       const hasSecondary = rng() < 0.35;
-      const msrps = i % 4 === 0
-        ? legacyPrices(msrp_primary_ex_vat * RATES[msrp_primary_currency] * (1 + def.markup / 100) * 1.05, def.additional)
-        : calcMSRPs(msrp_primary_ex_vat, msrp_primary_currency, def.markup, def.additional, RATES);
+      const msrps = calcMSRPs(msrp_primary_ex_vat, msrp_primary_currency, def.markup, def.additional, RATES);
       row = {
         ...row,
         msrp_primary_currency,
         msrp_primary_ex_vat,
         msrp_primary_inc_vat,
         msrp_secondary_currency: hasSecondary ? msrp_primary_currency : null,
-        msrp_secondary_ex_vat: hasSecondary ? pf2(msrp_primary_ex_vat * 1.08) : null,
-        msrp_secondary_inc_vat: hasSecondary ? pf2(msrp_primary_ex_vat * 1.08 * 1.2) : null,
+        msrp_secondary_ex_vat: hasSecondary ? round(msrp_primary_ex_vat * 1.08) : null,
+        msrp_secondary_inc_vat: hasSecondary ? round(msrp_primary_ex_vat * 1.08 * 1.2) : null,
         price_used: 'primary_ex_vat',
-        ...(msrps || {}),
+        ...((i % 4 === 0 ? preKuwait(msrps) : msrps) || {}),
       };
     }
 
     // A few manual overrides to exercise the override-aware code paths.
     if (rng() < 0.08 && row.msrp_aed) {
       row.uae_overridden = true;
-      row.msrp_aed = pf2(row.msrp_aed * 1.03);
+      row.msrp_aed = round(row.msrp_aed * 1.03);
     }
 
     items.push(row);
@@ -224,9 +209,8 @@ function seed() {
       target_margin_pct,
       msrp_aed_inc_vat: priced.msrp_aed_inc_vat ?? null,
       msrp_aed_ex_vat: priced.msrp_aed_ex_vat ?? null,
-      msrp_sar: priced.msrp_sar ?? null,
-      msrp_qat: priced.msrp_qat ?? null,
-      uae_overridden: false, ksa_overridden: false, qat_overridden: false,
+      ...Object.fromEntries(DERIVED.map(m => [m.price, priced[m.price] ?? null])),
+      ...Object.fromEntries(FLAG_COLUMNS.map(c => [c, false])),
       created_by: who,
       updated_at: when,
       updated_by: who,
@@ -243,9 +227,6 @@ function seed() {
     const applied_at = daysAgo(daysBack);
     const sample = pricingMaster.filter(it => !sampleBrand || it.brand_code === sampleBrand);
     const rows = sample.slice(0, 24).map(it => {
-      const oldAed = it.msrp_aed;
-      const oldSar = it.msrp_sar;
-      const oldQat = it.msrp_qat;
       return {
         id: hid++,
         batch_id,
@@ -254,13 +235,11 @@ function seed() {
         operation_type,
         changed_at: applied_at,
         changed_by: applied_by,
-        old_msrp_aed: oldAed != null ? pf2(oldAed / factor) : null,
-        new_msrp_aed: oldAed,
-        old_msrp_sar: oldSar != null ? pf2(oldSar / factor) : null,
-        new_msrp_sar: oldSar,
-        old_msrp_qat: oldQat != null ? pf2(oldQat / factor) : null,
-        new_msrp_qat: oldQat,
-        old_exw_cost: it.exw_cost != null ? pf2(it.exw_cost / factor) : null,
+        ...Object.fromEntries(MARKETS.flatMap(m => [
+          [`old_${m.price}`, it[m.price] != null ? round(it[m.price] / factor, m.dp) : null],
+          [`new_${m.price}`, it[m.price]],
+        ])),
+        old_exw_cost: it.exw_cost != null ? round(it.exw_cost / factor) : null,
         new_exw_cost: it.exw_cost,
         old_shipping_rate: it.shipping_rate,
         new_shipping_rate: it.shipping_rate,

@@ -2,11 +2,10 @@ import { useState, useEffect } from 'react';
 import { toNum } from '../../lib/num';
 import * as XLSX from 'xlsx-js-style';
 import { fetchItemsByCodes, fetchItemsForOverride, bulkUpdateItemFields, fetchBrands } from '../../lib/db';
-import { suggestKSAPrice, suggestQATPrice, suggestKWDPrice } from '../../lib/pricing';
+import { MARKETS as REGISTRY, UAE, deriveMarket } from '../../lib/markets';
 import { t, inp, btnW, btnG, lbl, groupBox, groupHead } from './styles';
 import BrandSelect from './BrandSelect';
 
-const roundTo = (v, dp) => (v != null ? parseFloat(v.toFixed(dp)) : null);
 const fmt   = (v) => (v === null || v === undefined || v === '' ? '—' : Number(v).toLocaleString());
 
 // Rendering every row of a 90k-item filter would lock the tab, so the diff list
@@ -14,14 +13,13 @@ const fmt   = (v) => (v === null || v === undefined || v === '' ? '—' : Number
 const PREVIEW_CAP = 200;
 const MATCH_CAP   = 500;   // rows rendered in the match list, same reason
 
-// KSA/QAT derive from AED only — the app has no inverse formula — so UAE has no
-// "auto" mode and is always either given explicitly or left as stored.
-const MARKETS = [
-  { k:'uae', label:'UAE (AED)', field:'msrp_aed', flag:'uae_overridden', auto:false },
-  { k:'ksa', label:'KSA (SAR)', field:'msrp_sar', flag:'ksa_overridden', auto:true, derive:suggestKSAPrice },
-  { k:'qat', label:'QAT (QAR)', field:'msrp_qat', flag:'qat_overridden', auto:true, derive:suggestQATPrice },
-  { k:'kwd', label:'KWT (KWD)', field:'msrp_kwd', flag:'kwd_overridden', auto:true, derive:suggestKWDPrice, dp:3 },
-];
+// The other markets derive from AED only — the app has no inverse formula — so
+// UAE has no "auto" mode and is always either given explicitly or left as stored.
+const MARKETS = REGISTRY.map(m => ({
+  k: m.code, label: `${m.short} (${m.currency})`, field: m.price, flag: m.flag,
+  auto: !!m.derive, derive: m.derive && ((aed) => deriveMarket(m, aed)),
+}));
+const each = (v) => Object.fromEntries(MARKETS.map(m => [m.k, v]));
 
 const box = {
   width:'100%', minHeight:240, resize:'vertical',
@@ -77,9 +75,9 @@ function Seg({ choices, value, onChange }) {
 }
 export default function MassOverride({ onToast, isViewer }) {
   const [selectMode, setSelectMode] = useState('paste');   // 'paste' | 'filter'
-  const [modes, setModes] = useState({ uae:'value', ksa:'auto', qat:'auto', kwd:'auto' });
-  const [cols,  setCols]  = useState({ sku:'', uae:'', ksa:'', qat:'', kwd:'' });
-  const [single, setSingle] = useState({ uae:'', ksa:'', qat:'', kwd:'' });
+  const [modes, setModes] = useState(() => Object.fromEntries(MARKETS.map(m => [m.k, m.auto ? 'auto' : 'value'])));
+  const [cols,  setCols]  = useState(() => ({ sku:'', ...each('') }));
+  const [single, setSingle] = useState(() => each(''));
 
   const [filter, setFilter]         = useState({ brandCode:'', search:'' });
   const [matches, setMatches]       = useState(null);   // rows from the filter
@@ -151,10 +149,10 @@ export default function MassOverride({ onToast, isViewer }) {
       for (const row of rows) {
         // The AED figure auto conversions key off: the explicit value if one is
         // given for this row, otherwise whatever is already stored.
-        const explicitAed = modes.uae === 'value'
-          ? toNum(selectMode === 'filter' ? single.uae : lineOf(row, 'uae'))
+        const explicitAed = modes[UAE.code] === 'value'
+          ? toNum(selectMode === 'filter' ? single[UAE.code] : lineOf(row, UAE.code))
           : null;
-        const baseAed = explicitAed ?? toNum(row.msrp_aed);
+        const baseAed = explicitAed ?? toNum(row[UAE.price]);
         if (needsBase && baseAed == null) { noBase.push(row.item_code); continue; }
 
         const targets = {};
@@ -166,7 +164,7 @@ export default function MassOverride({ onToast, isViewer }) {
             if (v == null) continue;   // blank = skip this market for this row
             targets[m.field] = v;
           } else if (mode === 'auto' && m.derive) {
-            targets[m.field] = roundTo(m.derive(baseAed), m.dp ?? 2);
+            targets[m.field] = m.derive(baseAed);
           }
         }
 
@@ -271,7 +269,7 @@ export default function MassOverride({ onToast, isViewer }) {
                       <table style={{ width:'100%', borderCollapse:'collapse' }}>
                         <thead>
                           <tr>
-                            {['Item code','Name','UAE (AED)','KSA (SAR)','QAT (QAR)'].map((h, i) => (
+                            {['Item code','Name',...MARKETS.map(m => m.label)].map((h, i) => (
                               <th key={h} style={{
                                 position:'sticky', top:0, zIndex:1, background:t.bg3,
                                 textAlign: i > 1 ? 'right' : 'left',
@@ -347,7 +345,7 @@ export default function MassOverride({ onToast, isViewer }) {
             </div>
           ))}
         </div>
-        {needsBase && modes.uae !== 'value' && (
+        {needsBase && modes[UAE.code] !== 'value' && (
           <div style={{ marginTop:12, fontSize:12, color:t.t4 }}>
             Auto conversion will key off each item&apos;s stored UAE price.
           </div>

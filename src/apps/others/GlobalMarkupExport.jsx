@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { fetchBrandsWithStats, fetchBrandItems, fetchRates, updateBrandAdditionalMarkup, insertPriceHistoryBatch, bulkInsertPriceHistory, bulkUpdateMarkupPrices } from '../../lib/db';
 import { pricesAtAdditionalMarkup, compoundMarkup } from '../../lib/pricing';
+import { MARKETS } from '../../lib/markets';
 import { t, inp, btnW, btnG, lbl, groupBox } from '../pricing/styles';
 import { useAuth } from '../../lib/AuthContext';
 import { downloadCSV } from '../../lib/csvExport';
@@ -12,13 +13,8 @@ import { downloadXLSX } from '../../lib/xlsxExport';
 // Idempotent across repeated calls with the same %.
 function computePricesWithMarkup(item, additionalPct, ctx) {
   const p = pricesAtAdditionalMarkup(item, additionalPct, ctx);
-  if (!p) return { new_aed: null, new_sar: null, new_qat: null, new_kwd: null };
-  return {
-    new_aed: !item.uae_overridden ? p.msrp_aed : null,
-    new_sar: !item.ksa_overridden ? p.msrp_sar : null,
-    new_qat: !item.qat_overridden ? p.msrp_qat : null,
-    new_kwd: !item.kwd_overridden ? p.msrp_kwd : null,
-  };
+  // Each market's new price, keyed by column — null where hand-set or unknown.
+  return Object.fromEntries(MARKETS.map(m => [m.price, p && !item[m.flag] ? p[m.price] : null]));
 }
 
 // ── FILTER DROPDOWN ──────────────────────────────────────────
@@ -243,7 +239,7 @@ export default function GlobalMarkupExport({ setExportActions }) {
 
         const items = await fetchBrandItems(brand.brand_code);
         for (const item of items) {
-          const { new_aed, new_sar, new_qat, new_kwd } = computePricesWithMarkup(item, additional, { markup: brand.markup_percentage, rates });
+          const next = computePricesWithMarkup(item, additional, { markup: brand.markup_percentage, rates });
 
           historyRows.push({
             item_code:    item.item_code,
@@ -252,24 +248,14 @@ export default function GlobalMarkupExport({ setExportActions }) {
             operation_type: 'global_markup',
             changed_at:   now,
             changed_by:   userEmail,
-            old_msrp_aed: item.msrp_aed ?? null,
-            new_msrp_aed: new_aed,
-            old_msrp_sar: item.msrp_sar ?? null,
-            new_msrp_sar: new_sar,
-            old_msrp_qat: item.msrp_qat ?? null,
-            new_msrp_qat: new_qat,
-            old_msrp_kwd: item.msrp_kwd ?? null,
-            new_msrp_kwd: new_kwd,
+            ...Object.fromEntries(MARKETS.flatMap(m => [[`old_${m.price}`, item[m.price] ?? null], [`new_${m.price}`, next[m.price]]])),
           });
 
           // Only queue a write if at least one price actually changed
-          if (new_aed != null || new_sar != null || new_qat != null || new_kwd != null) {
+          if (MARKETS.some(m => next[m.price] != null)) {
             priceUpdates.push({
               item_code: item.item_code,
-              msrp_aed:  new_aed ?? item.msrp_aed,
-              msrp_sar:  new_sar ?? item.msrp_sar,
-              msrp_qat:  new_qat ?? item.msrp_qat,
-              msrp_kwd:  new_kwd ?? item.msrp_kwd,
+              ...Object.fromEntries(MARKETS.map(m => [m.price, next[m.price] ?? item[m.price]])),
             });
           }
         }
@@ -390,19 +376,13 @@ export default function GlobalMarkupExport({ setExportActions }) {
         addLog(`  ${items.length} items fetched`);
 
         for (const item of items) {
-          const { new_aed, new_sar, new_qat, new_kwd } = computePricesWithMarkup(item, additional, { markup: brand.markup_percentage, rates });
+          const next = computePricesWithMarkup(item, additional, { markup: brand.markup_percentage, rates });
 
           rows.push({
             item_code: item.item_code,
             barcode:   item.barcode ?? '',
-            old_aed:   item.msrp_aed ?? '',
-            old_sar:   item.msrp_sar ?? '',
-            old_qat:   item.msrp_qat ?? '',
-            old_kwd:   item.msrp_kwd ?? '',
-            new_aed:   new_aed != null ? new_aed.toFixed(2) : '',
-            new_sar:   new_sar != null ? new_sar.toFixed(2) : '',
-            new_qat:   new_qat != null ? new_qat.toFixed(2) : '',
-            new_kwd:   new_kwd != null ? new_kwd.toFixed(3) : '',
+            ...Object.fromEntries(MARKETS.map(m => [`old_${m.key}`, item[m.price] ?? ''])),
+            ...Object.fromEntries(MARKETS.map(m => [`new_${m.key}`, next[m.price] != null ? next[m.price].toFixed(m.dp) : ''])),
           });
         }
       }

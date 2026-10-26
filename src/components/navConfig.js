@@ -36,11 +36,11 @@ export const NAV = [
   {
     group: 'Pricing',
     icon: IconPercent, accent: '#f5a623',
-    description: 'The rules that set selling prices across UAE, KSA and Qatar — and the history to undo a change.',
+    description: 'The rules that set selling prices in every market — and the history to undo a change.',
     items: [
       { label: 'Brands',         icon: IconBookmark, path: '/apps/pricing-master/brands' },
       { label: 'Global Markup',  icon: IconPercent,  path: '/apps/others/global-markup' },
-      { label: 'Price Rounding', icon: IconRefresh,  path: '/apps/others/rounding' },
+      { label: 'Price Rules',    icon: IconRefresh,  path: '/apps/others/rounding' },
       { label: 'Rollback',       icon: IconHistory,  path: '/apps/pricing-master/rollback' },
     ],
   },

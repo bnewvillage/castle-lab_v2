@@ -58,6 +58,6 @@ export const rollbackBatch             = (...a) => impl.rollbackBatch(...a);
 export const fetchProjectItems         = (...a) => impl.fetchProjectItems(...a);
 export const saveProjectItem           = (...a) => impl.saveProjectItem(...a);
 export const deleteProjectItem         = (...a) => impl.deleteProjectItem(...a);
-export const fetchAllItemsForRounding  = (...a) => impl.fetchAllItemsForRounding(...a);
-export const applyPriceRounding        = (...a) => impl.applyPriceRounding(...a);
+export const fetchAllItemPrices        = (...a) => impl.fetchAllItemPrices(...a);
+export const applyPriceChanges         = (...a) => impl.applyPriceChanges(...a);
 export const bulkUpdateProjectItems    = (...a) => impl.bulkUpdateProjectItems(...a);

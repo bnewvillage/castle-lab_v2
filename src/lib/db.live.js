@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
-import { toNum } from './num';
 import { BRAND_DEFAULT_FIELDS, brandDefaultsFrom } from './pricing';
+import { itemRow, projectItemRow, PRICES_SELECT, FLAGS_SELECT, ALL_PRICES_SELECT, HISTORY_SELECT } from './rows';
 import { orExpression } from './search';
 
 // ── INTERNAL HELPERS ──────────────────────────────────────────
@@ -32,51 +32,9 @@ async function fetchAllPages(buildQuery) {
   return all;
 }
 
-// The Kuwait columns, only for the ones the row actually carries.
-function kwdFields(item, { real = true } = {}) {
-  const out = {};
-  if ('msrp_kwd' in item)              out.msrp_kwd       = toNum(item.msrp_kwd);
-  if (real && 'real_msrp_kwd' in item) out.real_msrp_kwd  = toNum(item.real_msrp_kwd);
-  if ('kwd_overridden' in item)        out.kwd_overridden = !!item.kwd_overridden;
-  return out;
-}
-
 // stripItem no longer calls getUser — callers fetch the user once and pass it in.
 function stripItem(item, user) {
-  return {
-    item_code:                item.item_code?.toUpperCase(),
-    item_name:                item.item_name,
-    brand_code:               item.brand_code,
-    barcode:                  item.barcode || null,
-    cost_currency:            item.cost_currency,
-    exw_cost:                 toNum(item.exw_cost),
-    shipping_rate:            toNum(item.shipping_rate) ?? 0,
-    customs_duty_rate:        toNum(item.customs_duty_rate) ?? 5.5,
-    msrp_primary_ex_vat:      toNum(item.msrp_primary_ex_vat),
-    msrp_primary_inc_vat:     toNum(item.msrp_primary_inc_vat),
-    msrp_primary_currency:    item.msrp_primary_currency || null,
-    msrp_secondary_ex_vat:    toNum(item.msrp_secondary_ex_vat),
-    msrp_secondary_inc_vat:   toNum(item.msrp_secondary_inc_vat),
-    msrp_secondary_currency:  item.msrp_secondary_currency || null,
-    price_used:               item.price_used || null,
-    target_margin_pct:        toNum(item.target_margin_pct),
-    price_source:             item.price_source || null,
-    msrp_aed:                 toNum(item.msrp_aed),
-    msrp_sar:                 toNum(item.msrp_sar),
-    msrp_qat:                 toNum(item.msrp_qat),
-    real_msrp_aed:            toNum(item.real_msrp_aed),
-    real_msrp_sar:            toNum(item.real_msrp_sar),
-    real_msrp_qat:            toNum(item.real_msrp_qat),
-    uae_overridden:           item.uae_overridden ?? false,
-    ksa_overridden:           item.ksa_overridden ?? false,
-    qat_overridden:           item.qat_overridden ?? false,
-    // Kuwait only when the caller supplies it: a save path that doesn't know
-    // about Kuwait must leave the stored Kuwait price alone, not blank it.
-    ...kwdFields(item),
-    cost_source:              item.cost_source || null,
-    updated_at:               new Date().toISOString(),
-    updated_by:               user?.email || null,
-  };
+  return { ...itemRow(item), updated_at: new Date().toISOString(), updated_by: user?.email || null };
 }
 
 // ── EXCHANGE RATES ────────────────────────────────────────────
@@ -225,7 +183,7 @@ export async function fetchItemsByCodes(itemCodes) {
   const results = [];
   for (const batch of chunkArray(codes, CHUNK)) {
     const { data, error } = await supabase.from('pricing_master')
-      .select('item_code, brand_code, item_name, barcode, exw_cost, cost_currency, shipping_rate, customs_duty_rate, msrp_primary_ex_vat, msrp_primary_inc_vat, msrp_primary_currency, msrp_secondary_ex_vat, msrp_secondary_inc_vat, msrp_secondary_currency, price_used, target_margin_pct, cost_source, price_source, msrp_aed, msrp_sar, msrp_qat, msrp_kwd, real_msrp_aed, real_msrp_sar, real_msrp_qat, real_msrp_kwd, uae_overridden, ksa_overridden, qat_overridden, kwd_overridden')
+      .select(`item_code, brand_code, item_name, barcode, exw_cost, cost_currency, shipping_rate, customs_duty_rate, msrp_primary_ex_vat, msrp_primary_inc_vat, msrp_primary_currency, msrp_secondary_ex_vat, msrp_secondary_inc_vat, msrp_secondary_currency, price_used, target_margin_pct, cost_source, price_source, ${ALL_PRICES_SELECT}`)
       .in('item_code', batch);
     if (error) throw error;
     results.push(...data);
@@ -240,7 +198,7 @@ export async function fetchItemList({
 } = {}) {
   let query = supabase
     .from('pricing_master')
-    .select('item_code, item_name, barcode, brand_code, cost_currency, exw_cost, shipping_rate, customs_duty_rate, msrp_primary_ex_vat, msrp_primary_inc_vat, msrp_primary_currency, msrp_secondary_ex_vat, msrp_secondary_inc_vat, msrp_secondary_currency, price_used, msrp_aed, msrp_sar, msrp_qat, msrp_kwd, price_source, cost_source, target_margin_pct, created_at, updated_at, updated_by', { count: 'exact' })
+    .select(`item_code, item_name, barcode, brand_code, cost_currency, exw_cost, shipping_rate, customs_duty_rate, msrp_primary_ex_vat, msrp_primary_inc_vat, msrp_primary_currency, msrp_secondary_ex_vat, msrp_secondary_inc_vat, msrp_secondary_currency, price_used, ${PRICES_SELECT}, price_source, cost_source, target_margin_pct, created_at, updated_at, updated_by`, { count: 'exact' })
     .order(sortCol, { ascending: sortDir === 'asc', nullsFirst: false })
     .range(page * pageSize, (page + 1) * pageSize - 1);
 
@@ -328,7 +286,7 @@ export async function fetchItemsForOverride({ brandCode, search } = {}) {
   return fetchAllPages((from, to) => {
     let q = supabase
       .from('pricing_master')
-      .select('item_code, item_name, brand_code, msrp_aed, msrp_sar, msrp_qat, msrp_kwd, uae_overridden, ksa_overridden, qat_overridden, kwd_overridden')
+      .select(`item_code, item_name, brand_code, ${PRICES_SELECT}, ${FLAGS_SELECT}`)
       .order('item_code')
       .range(from, to);
     if (brandCode) q = q.eq('brand_code', brandCode);
@@ -493,7 +451,7 @@ export async function getErpMaxModified() {
 export async function fetchAllPricesForExport() {
   return fetchAllPages((from, to) =>
     supabase.from('pricing_master')
-      .select('item_code, barcode, msrp_aed, msrp_sar, msrp_qat, msrp_kwd')
+      .select(`item_code, barcode, ${PRICES_SELECT}`)
       .not('item_code', 'is', null)
       .order('item_code')
       .range(from, to)
@@ -505,7 +463,7 @@ export async function fetchAllItemsForErpAutomation(brandCodes) {
   const filtered = Array.isArray(brandCodes) && brandCodes.length > 0;
   return fetchAllPages((from, to) => {
     let q = supabase.from('pricing_master')
-      .select('item_code, item_name, brand_code, barcode, msrp_aed, msrp_sar, msrp_qat, msrp_kwd')
+      .select(`item_code, item_name, brand_code, barcode, ${PRICES_SELECT}`)
       .not('item_code', 'is', null)
       .order('item_code')
       .range(from, to);
@@ -520,7 +478,7 @@ export async function fetchBrandItems(brandCode) {
   const code = brandCode.toUpperCase();
   return fetchAllPages((from, to) =>
     supabase.from('pricing_master')
-      .select('item_code, barcode, exw_cost, cost_currency, target_margin_pct, shipping_rate, customs_duty_rate, msrp_primary_ex_vat, msrp_primary_inc_vat, msrp_primary_currency, msrp_secondary_ex_vat, msrp_secondary_inc_vat, msrp_secondary_currency, price_used, msrp_aed, msrp_sar, msrp_qat, msrp_kwd, real_msrp_aed, real_msrp_sar, real_msrp_qat, real_msrp_kwd, uae_overridden, ksa_overridden, qat_overridden, kwd_overridden, cost_source, price_source')
+      .select(`item_code, barcode, exw_cost, cost_currency, target_margin_pct, shipping_rate, customs_duty_rate, msrp_primary_ex_vat, msrp_primary_inc_vat, msrp_primary_currency, msrp_secondary_ex_vat, msrp_secondary_inc_vat, msrp_secondary_currency, price_used, ${ALL_PRICES_SELECT}, cost_source, price_source`)
       .eq('brand_code', code)
       .order('item_code')
       .range(from, to)
@@ -577,7 +535,7 @@ export async function fetchPriceHistoryBatches() {
 export async function fetchBatchItems(batchId, limit = 20, offset = 0) {
   const { data, error } = await supabase
     .from('price_history')
-    .select('item_code, brand_code, old_msrp_aed, new_msrp_aed, old_msrp_sar, new_msrp_sar, old_msrp_qat, new_msrp_qat, old_msrp_kwd, new_msrp_kwd')
+    .select(`item_code, brand_code, ${HISTORY_SELECT}`)
     .eq('batch_id', batchId)
     .range(offset, offset + limit - 1);
   if (error) throw error;
@@ -587,7 +545,7 @@ export async function fetchBatchItems(batchId, limit = 20, offset = 0) {
 export async function fetchAllBatchItems(batchId) {
   return fetchAllPages((from, to) =>
     supabase.from('price_history')
-      .select('item_code, brand_code, old_msrp_aed, new_msrp_aed, old_msrp_sar, new_msrp_sar, old_msrp_qat, new_msrp_qat, old_msrp_kwd, new_msrp_kwd, changed_at, changed_by')
+      .select(`item_code, brand_code, ${HISTORY_SELECT}, changed_at, changed_by`)
       .eq('batch_id', batchId)
       .order('item_code')
       .range(from, to)
@@ -618,25 +576,7 @@ export async function saveProjectItem(item, { isNew = false } = {}) {
   const email = user?.email || null;
   const now   = new Date().toISOString();
   const code  = item.item_code?.toUpperCase();
-  const row = {
-    item_code:         code,
-    project_item_name: item.project_item_name || null,
-    cost:              toNum(item.cost),
-    cost_currency:     item.cost_currency,
-    shipping_rate:     toNum(item.shipping_rate) ?? 0,
-    customs_duty_rate: toNum(item.customs_duty_rate) ?? 5.5,
-    target_margin_pct: toNum(item.target_margin_pct) ?? 25,
-    msrp_aed_inc_vat:  toNum(item.msrp_aed_inc_vat),
-    msrp_aed_ex_vat:   toNum(item.msrp_aed_ex_vat),
-    msrp_sar:          toNum(item.msrp_sar),
-    msrp_qat:          toNum(item.msrp_qat),
-    uae_overridden:    item.uae_overridden ?? false,
-    ksa_overridden:    item.ksa_overridden ?? false,
-    qat_overridden:    item.qat_overridden ?? false,
-    ...kwdFields(item, { real: false }),
-    updated_at:        now,
-    updated_by:        email,
-  };
+  const row = { ...projectItemRow(item), updated_at: now, updated_by: email };
 
   if (isNew) {
     const { error } = await supabase
@@ -707,23 +647,17 @@ export async function renameItemCodes(pairs) {
   return { renamed: data?.renamed ?? 0, historyRows: data?.history_rows ?? 0 };
 }
 
-// ── PRICE ROUNDING ────────────────────────────────────────────
-const ROUNDING_FIELDS = 'item_code, item_name, brand_code, price_used, '
-  + 'msrp_primary_ex_vat, msrp_primary_inc_vat, msrp_primary_currency, '
-  + 'msrp_secondary_ex_vat, msrp_secondary_inc_vat, msrp_secondary_currency, '
-  + 'exw_cost, cost_currency, target_margin_pct, '
-  + 'msrp_aed, msrp_sar, msrp_qat, msrp_kwd, real_msrp_aed, real_msrp_sar, real_msrp_qat, real_msrp_kwd, '
-  + 'uae_overridden, ksa_overridden, qat_overridden, kwd_overridden, updated_at';
+// ── CATALOGUE-WIDE PRICE CHANGES ──────────────────────────────
 
 // Reads the whole catalogue with keyset pagination: each page seeks past the
 // last code seen instead of OFFSET-scanning everything before it. Stops only on
 // an empty page, so a server max_rows cap below the requested size cannot
 // silently truncate the result.
-export async function fetchAllItemsForRounding() {
+export async function fetchAllItemPrices() {
   const all = [];
   let after = null;
   for (;;) {
-    let q = supabase.from('pricing_master').select(ROUNDING_FIELDS).order('item_code').limit(1000);
+    let q = supabase.from('pricing_master').select(`item_code, item_name, brand_code, ${ALL_PRICES_SELECT}`).order('item_code').limit(1000);
     if (after != null) q = q.gt('item_code', after);
     const { data, error } = await q;
     if (error) throw error;
@@ -734,11 +668,12 @@ export async function fetchAllItemsForRounding() {
   return all;
 }
 
-// Applies a planned re-round. Each chunk is one transaction that changes the
-// prices and writes their Rollback history together, and skips any item edited
-// since the preview (see the migration). Returns how many items were applied.
-// operation: the history type — 'rounding_rule' | 'ksa_recalc' | 'kwd_recalc'.
-export async function applyPriceRounding(batchId, changes, onProgress, operation = 'rounding_rule') {
+// Applies planned price changes ({ item_code, set, expect }). Each chunk is one
+// transaction that changes the prices and writes their Rollback history
+// together, and skips any item edited since the preview (the
+// apply_price_rounding RPC). Returns how many items were applied.
+// operation: the history type — a market's recalcOp.
+export async function applyPriceChanges(batchId, changes, onProgress, operation) {
   let applied = 0;
   const chunks = chunkArray(changes, CHUNK);
   for (let i = 0; i < chunks.length; i++) {

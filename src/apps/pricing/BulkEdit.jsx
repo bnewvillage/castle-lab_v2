@@ -7,7 +7,7 @@ import BulkCodeOps from './BulkCodeOps';
 // Changes to items that already exist, by pasted item code. Creating or
 // updating items from a sheet lives in Bulk Import.
 const MODES = [
-  { k: 'override', label: 'Mass Override', hint: 'Pin UAE, KSA or Qatar prices as manual overrides.' },
+  { k: 'override', label: 'Mass Override', hint: 'Pin market prices as manual overrides.' },
   { k: 'rename',   label: 'Rename codes',  hint: 'Change item codes, keeping their prices and history.' },
   { k: 'delete',   label: 'Delete items',  hint: 'Remove items from the pricing master.' },
 ];
