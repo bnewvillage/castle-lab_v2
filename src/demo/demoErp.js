@@ -19,6 +19,11 @@ function meta(reportName = '') {
 const UNMATCHED = ['LEGACY-4471', 'DISC-0098', 'ARCH-2210'];
 
 export function demoErpReport(reportName) {
+  // Kuwait's price list isn't set up in the (demo) ERP yet: answer the way the
+  // proxy does for a report the ERP doesn't have.
+  if (/KWD/.test(reportName)) {
+    return new Promise((_, reject) => setTimeout(() => reject(new Error('Report not found in the ERP')), 200));
+  }
   const { currency, price_list } = meta(reportName);
   const field = currency === 'SAR' ? 'msrp_sar' : currency === 'QAR' ? 'msrp_qat' : 'msrp_aed';
 

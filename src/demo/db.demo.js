@@ -253,6 +253,17 @@ export async function fetchAllPricesForExport() {
     .map(i => ({ item_code: i.item_code, barcode: i.barcode, msrp_aed: i.msrp_aed, msrp_sar: i.msrp_sar, msrp_qat: i.msrp_qat }));
 }
 
+// The Price Export's DB side: same fields as the live query.
+export async function fetchAllItemsForErpAutomation(brandCodes) {
+  await wait(150);
+  const filtered = Array.isArray(brandCodes) && brandCodes.length > 0;
+  return store.pricingMaster
+    .filter(i => i.item_code && (!filtered || brandCodes.includes(i.brand_code)))
+    .sort((a, b) => a.item_code.localeCompare(b.item_code))
+    .map(({ item_code, item_name, brand_code, barcode, msrp_aed, msrp_sar, msrp_qat }) =>
+      ({ item_code, item_name, brand_code, barcode: barcode ?? null, msrp_aed, msrp_sar, msrp_qat }));
+}
+
 export async function fetchBrandItems(brandCode) {
   await wait(120);
   return store.pricingMaster
@@ -437,6 +448,14 @@ export async function getErpCacheInfo() {
     syncedAt: new Date(Date.now() - 36e5).toISOString(),
     cursor:   null,
   };
+}
+
+// The demo ERP cache holds every catalogue item except erpMissingCodes().
+export async function filterCodesInErpCache(codes) {
+  await wait(60);
+  const missing = erpMissingCodes();
+  const known = new Set(store.pricingMaster.map(i => i.item_code));
+  return new Set(codes.filter(c => known.has(c) && !missing.has(c)));
 }
 
 export async function countErpItems() {

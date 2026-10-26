@@ -14,6 +14,9 @@ const ALLOWED_REPORTS = new Set([
   'PRICE-AED_ValidFromLatest',
   'PRICE-SAR_ValidFromLatest',
   'PRICE-QAR_ValidFromLatest',
+  // Allowed ahead of the ERP: until the report exists there, the proxy answers
+  // "Report not found" and the app skips Kuwait without failing the rest.
+  'PRICE-KWD_ValidFromLatest',
   'Item In Stock Without Price',
 ]);
 
@@ -316,7 +319,17 @@ Deno.serve(async (req) => {
       `${ERP_BASE}/api/method/frappe.desk.query_report.run?report_name=${encodeURIComponent(report_name)}`,
       { headers: { 'Accept': 'application/json', 'Cookie': sessionCookie } }
     );
-    if (!reportRes.ok) throw new Error(`Failed to fetch ${report_name} (${reportRes.status})`);
+    if (!reportRes.ok) {
+      // A report the ERP doesn't have is a normal answer, not a failure: the
+      // app skips that list and carries on with the others. Frappe signals it
+      // as 404, or as DoesNotExistError in the body.
+      const text = await reportRes.text().catch(() => '');
+      if (reportRes.status === 404 || /DoesNotExistError/.test(text)) {
+        return json({ error: 'Report not found in the ERP' }, 404, req);
+      }
+      console.error(`${report_name} error ${reportRes.status}:`, text.slice(0, 500));
+      throw new Error(`Failed to fetch ${report_name} (${reportRes.status})`);
+    }
     const reportBody = await reportRes.json();
     const message = (reportBody as {
       message?: { result?: unknown[]; columns?: unknown[] };

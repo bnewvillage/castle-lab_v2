@@ -9,6 +9,7 @@ import {
 import { downloadXLSX } from '../../lib/xlsxExport';
 import { callErpProxy as callProxy } from '../../lib/erpProxy';
 import ErpConnection from './ErpConnection';
+import { fetchReportsIndependently } from '../../lib/erpReports';
 import { DEMO } from '../../demo/demoConfig';
 import { demoErpReport } from '../../demo/demoErp';
 
@@ -318,10 +319,11 @@ export default function ERPAutomation({ view, creds, setCreds }) {
   const [expMerged, setExpMerged] = useState(null);
   const [expLog,    setExpLog]    = useState([]);
   const [expErr,    setExpErr]    = useState('');
+  const [expFailed, setExpFailed] = useState([]);   // price lists that couldn't be fetched, and why
 
   const handlePriceExport = async () => {
     if (!isConnected || expState === 'loading') return;
-    setExpState('loading'); setExpErr(''); setExpLog([]); setExpMerged(null);
+    setExpState('loading'); setExpErr(''); setExpLog([]); setExpMerged(null); setExpFailed([]);
     const addLog = m => setExpLog(p => [...p, m]);
     try {
       const scoped = expBrands.length > 0;
@@ -342,16 +344,19 @@ export default function ERPAutomation({ view, creds, setCreds }) {
             || (dbByCode[key] && expBrands.includes(dbByCode[key].brand_code));
       };
 
+      // Each price list on its own: one that fails is skipped, the rest still export.
       const merged = {};
-      for (const rep of PRICE_REPORTS) {
-        addLog(`Fetching ${rep.currency} report...`);
-        const all  = await fetchReport(email.trim(), password.trim(), rep.name);
-        const rows = all.filter(inScope);
-        merged[rep.key] = mergeByCode(rows, dbByCode, dbByBarcode, rep.dbField);
-        addLog(scoped
-          ? `${rep.currency}: ${rows.length.toLocaleString()} of ${all.length.toLocaleString()} rows in scope, ${merged[rep.key].filter(r => !r._missing).length} matched.`
-          : `${rep.currency}: ${rows.length.toLocaleString()} rows, ${merged[rep.key].filter(r => !r._missing).length} matched.`);
-      }
+      const { failed } = await fetchReportsIndependently(PRICE_REPORTS,
+        (rep) => { addLog(`Fetching ${rep.currency} report...`); return fetchReport(email.trim(), password.trim(), rep.name); },
+        (rep, all, why) => {
+          if (!all) { addLog(`${rep.currency}: skipped — ${why}. The other lists are unaffected.`); return; }
+          const rows = all.filter(inScope);
+          merged[rep.key] = mergeByCode(rows, dbByCode, dbByBarcode, rep.dbField);
+          addLog(scoped
+            ? `${rep.currency}: ${rows.length.toLocaleString()} of ${all.length.toLocaleString()} rows in scope, ${merged[rep.key].filter(r => !r._missing).length} matched.`
+            : `${rep.currency}: ${rows.length.toLocaleString()} rows, ${merged[rep.key].filter(r => !r._missing).length} matched.`);
+        });
+      setExpFailed(failed);
       setExpMerged(merged);
       setExpState('done');
     } catch (err) {
@@ -404,14 +409,17 @@ export default function ERPAutomation({ view, creds, setCreds }) {
     try {
       addLog('Fetching price list reports...');
       const withPrice = new Set();
-      for (const rep of PRICE_REPORTS) {
-        const rows = await fetchReport(email.trim(), password.trim(), rep.name);
-        rows.forEach(r => {
-          if (r.item_code && Number(r.price_list_rate) > 0)
-            withPrice.add(r.item_code.toUpperCase());
+      const { failed } = await fetchReportsIndependently(PRICE_REPORTS,
+        (rep) => fetchReport(email.trim(), password.trim(), rep.name),
+        (rep, rows, why) => {
+          if (!rows) { addLog(`${rep.currency}: skipped — ${why}. Items priced only on that list will show as unpriced.`); return; }
+          rows.forEach(r => {
+            if (r.item_code && Number(r.price_list_rate) > 0)
+              withPrice.add(r.item_code.toUpperCase());
+          });
+          addLog(`${rep.currency}: ${rows.length.toLocaleString()} rows.`);
         });
-        addLog(`${rep.currency}: ${rows.length.toLocaleString()} rows.`);
-      }
+      if (failed.length) addLog(`Coverage below leaves out ${failed.map(f => f.report.currency).join(', ')}.`);
       addLog(`${withPrice.size.toLocaleString()} items with retail price across all lists.`);
 
       addLog('Loading DB items...');
@@ -514,7 +522,16 @@ export default function ERPAutomation({ view, creds, setCreds }) {
 
         {expState === 'done' && expMerged && (
           <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {PRICE_REPORTS.map(rep => {
+            {expFailed.map(({ report, reason }) => (
+              <div key={report.key} style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                background: 'rgba(245,166,35,0.06)', border: '1px solid rgba(245,166,35,0.25)', borderRadius: 10, padding: '12px 16px',
+              }}>
+                <span style={{ fontSize: 13, color: t.t1, fontWeight: 500, minWidth: 50 }}>{report.currency}</span>
+                <span style={{ fontSize: 12.5, color: t.amber }}>Skipped — {reason}. The other lists are unaffected.</span>
+              </div>
+            ))}
+            {PRICE_REPORTS.filter(rep => expMerged[rep.key]).map(rep => {
               const rows    = expMerged[rep.key];
               const matched = rows.filter(r => !r._missing).length;
               return (
