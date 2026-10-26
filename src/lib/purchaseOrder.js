@@ -88,6 +88,28 @@ export function parsePoInput(codesRaw, qtysRaw, datesRaw = '') {
   return out;
 }
 
+// ── The ERP's text limit ─────────────────────────────────────
+// The ERP's short text fields (Item Name among them) hold 140 characters, and
+// the PO upload is refused — not truncated — when a value is longer. Counted
+// in characters as the ERP counts them (Unicode code points, not UTF-16 units).
+export const ERP_TEXT_MAX = 140;
+const charCount = (s) => Array.from(s).length;
+export const tooLongForErp = (s) => s != null && charCount(String(s)) > ERP_TEXT_MAX;
+
+// Shortened to fit: cut at the last word break that leaves room for "…",
+// or mid-word when the first 139 characters hold no break worth using.
+export function fitErpText(s) {
+  if (!tooLongForErp(s)) return s ?? '';
+  const chars = Array.from(String(s)).slice(0, ERP_TEXT_MAX - 1);
+  let cut = chars.length;
+  for (let i = chars.length; i > ERP_TEXT_MAX * 0.6; i--) {
+    if (/\s/.test(chars[i])) { cut = i; break; }
+  }
+  return chars.slice(0, cut).join('').replace(/[\s,;:/(–-]+$/, '') + '…';
+}
+
+export const NAME_SHORTENED = `name shortened to ${ERP_TEXT_MAX} characters for the ERP`;
+
 // ── Building PO lines from the database ──────────────────────
 
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -141,6 +163,7 @@ export function buildPoLines(input, itemsByCode) {
     if (r.rate === 0) r.warnings.push('zero cost');
     if (r.currency && currency && r.currency !== currency) r.warnings.push(`priced in ${r.currency}, PO is ${currency}`);
     if (r.duplicate) r.warnings.push('duplicate code');
+    if (tooLongForErp(r.name)) r.warnings.push(NAME_SHORTENED);
   }
   return { rows, currency };
 }
@@ -181,7 +204,7 @@ export function poCsv(rows, defaultDate) {
   const body = rows
     .filter(r => !r.errors.length)
     .map(r => [
-      r.code, r.qty, DEFAULT_UOM, DEFAULT_UOM, 1, r.qty, r.name, r.brand,
+      r.code, r.qty, DEFAULT_UOM, DEFAULT_UOM, 1, r.qty, fitErpText(r.name), r.brand,
       rateCell(r.rate), '', r.amount == null ? '' : r.amount.toFixed(2), '', '', '',
       erpDate(r.date || defaultDate),
     ].map(cell).join(','));
@@ -254,6 +277,7 @@ export function requestLineCheck(r, currency) {
   if (r.item && r.rate === 0) warnings.push('zero cost');
   if (qty != null && qty > r.outstanding_qty + 1e-9) warnings.push(`more than the ${num(r.outstanding_qty)} outstanding`);
   if (r.draft_pos?.length) warnings.push(`already on draft ${r.draft_pos.join(', ')}`);
+  if (tooLongForErp(r.item_name)) warnings.push(NAME_SHORTENED);
   if (r.item && currency && r.currency && r.currency !== currency) warnings.push(`priced in ${r.currency}, PO is ${currency}`);
   return { errors, warnings };
 }
@@ -283,7 +307,7 @@ export function requestPoCsv(rows, defaultDate) {
         fg_item_qty:            1,
         item_code:              r.item_code,
         supplier_part_no:       supplierPartNo(r.item_code, r.item?.brand_code),
-        item_name:              r.item_name,
+        item_name:              fitErpText(r.item_name),
         brand:                  r.brand,
         schedule_date:          erpDate(r.schedule_date),
         expected_delivery_date: erpDate(r.date || defaultDate),
