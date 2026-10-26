@@ -2,11 +2,11 @@ import { useState, useEffect } from 'react';
 import { toNum } from '../../lib/num';
 import * as XLSX from 'xlsx-js-style';
 import { fetchItemsByCodes, fetchItemsForOverride, bulkUpdateItemFields, fetchBrands } from '../../lib/db';
-import { suggestKSAPrice, suggestQATPrice } from '../../lib/pricing';
+import { suggestKSAPrice, suggestQATPrice, suggestKWDPrice } from '../../lib/pricing';
 import { t, inp, btnW, btnG, lbl, groupBox, groupHead } from './styles';
 import BrandSelect from './BrandSelect';
 
-const pf2   = (v) => (v != null ? parseFloat(v.toFixed(2)) : null);
+const roundTo = (v, dp) => (v != null ? parseFloat(v.toFixed(dp)) : null);
 const fmt   = (v) => (v === null || v === undefined || v === '' ? '—' : Number(v).toLocaleString());
 
 // Rendering every row of a 90k-item filter would lock the tab, so the diff list
@@ -20,6 +20,7 @@ const MARKETS = [
   { k:'uae', label:'UAE (AED)', field:'msrp_aed', flag:'uae_overridden', auto:false },
   { k:'ksa', label:'KSA (SAR)', field:'msrp_sar', flag:'ksa_overridden', auto:true, derive:suggestKSAPrice },
   { k:'qat', label:'QAT (QAR)', field:'msrp_qat', flag:'qat_overridden', auto:true, derive:suggestQATPrice },
+  { k:'kwd', label:'KWT (KWD)', field:'msrp_kwd', flag:'kwd_overridden', auto:true, derive:suggestKWDPrice, dp:3 },
 ];
 
 const box = {
@@ -76,9 +77,9 @@ function Seg({ choices, value, onChange }) {
 }
 export default function MassOverride({ onToast, isViewer }) {
   const [selectMode, setSelectMode] = useState('paste');   // 'paste' | 'filter'
-  const [modes, setModes] = useState({ uae:'value', ksa:'auto', qat:'auto' });
-  const [cols,  setCols]  = useState({ sku:'', uae:'', ksa:'', qat:'' });
-  const [single, setSingle] = useState({ uae:'', ksa:'', qat:'' });
+  const [modes, setModes] = useState({ uae:'value', ksa:'auto', qat:'auto', kwd:'auto' });
+  const [cols,  setCols]  = useState({ sku:'', uae:'', ksa:'', qat:'', kwd:'' });
+  const [single, setSingle] = useState({ uae:'', ksa:'', qat:'', kwd:'' });
 
   const [filter, setFilter]         = useState({ brandCode:'', search:'' });
   const [matches, setMatches]       = useState(null);   // rows from the filter
@@ -128,7 +129,7 @@ export default function MassOverride({ onToast, isViewer }) {
         rows = matches;
       } else {
         const lines = Object.fromEntries(
-          ['sku','uae','ksa','qat'].map(k => [k, cols[k].split('\n').map(s => s.trim())]),
+          ['sku', ...MARKETS.map(m => m.k)].map(k => [k, cols[k].split('\n').map(s => s.trim())]),
         );
         const entries = [];
         lines.sku.forEach((sku, i) => { if (sku) entries.push({ sku, i }); });
@@ -165,7 +166,7 @@ export default function MassOverride({ onToast, isViewer }) {
             if (v == null) continue;   // blank = skip this market for this row
             targets[m.field] = v;
           } else if (mode === 'auto' && m.derive) {
-            targets[m.field] = pf2(m.derive(baseAed));
+            targets[m.field] = roundTo(m.derive(baseAed), m.dp ?? 2);
           }
         }
 

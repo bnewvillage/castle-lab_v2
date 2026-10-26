@@ -39,6 +39,8 @@ export const round = (v, dp = 2) => {
 export function money(v, currency, decimals) {
   const n = toNum(v);
   if (n === null) return '—';
+  // Dinar prices are written to the fils: KWD 4.900, not 4.9.
+  if (decimals == null && currency === 'KWD') decimals = 3;
   const body = decimals == null
     ? n.toLocaleString()
     : n.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });

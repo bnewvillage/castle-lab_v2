@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { saveProjectItem } from '../../lib/db';
-import { calcProjectPrice, formatMargin, MARGIN_COLORS, suggestKSAPrice, suggestQATPrice, DEFAULT_PROJECT_MARGIN_PCT, KSA_FACTOR } from '../../lib/pricing';
+import { calcProjectPrice, formatMargin, MARGIN_COLORS, suggestKSAPrice, suggestQATPrice, suggestKWDPrice, DEFAULT_PROJECT_MARGIN_PCT, KSA_FACTOR, KWD_FACTOR } from '../../lib/pricing';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead } from './styles';
 import { toNum, hasNum, round, money } from '../../lib/num';
 import { useAuth } from '../../lib/AuthContext';
@@ -36,10 +36,12 @@ const BLANK = {
   uae_overridden:    false,
   ksa_overridden:    false,
   qat_overridden:    false,
+  kwd_overridden:    false,
   msrp_aed_inc_vat:  '',
   msrp_aed_ex_vat:   '',
   msrp_sar:          '',
   msrp_qat:          '',
+  msrp_kwd:          '',
 };
 
 // ── ITEM FORM ─────────────────────────────────────────────────
@@ -57,10 +59,12 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
     uae_overridden:    item.uae_overridden ?? false,
     ksa_overridden:    item.ksa_overridden ?? false,
     qat_overridden:    item.qat_overridden ?? false,
+    kwd_overridden:    item.kwd_overridden ?? false,
     msrp_aed_inc_vat:  item.msrp_aed_inc_vat ?? '',
     msrp_aed_ex_vat:   item.msrp_aed_ex_vat ?? '',
     msrp_sar:          item.msrp_sar ?? '',
     msrp_qat:          item.msrp_qat ?? '',
+    msrp_kwd:          item.msrp_kwd ?? '',
   } : { ...BLANK };
 
   const [form, setForm] = useState(() => {
@@ -107,17 +111,18 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
     }
   }, [form.cost, form.cost_currency, form.shipping_rate, form.customs_duty_rate, form.target_margin_pct, form.uae_overridden, rates]);
 
-  // ── Auto-suggest SAR/QAT from AED ex_vat whenever it changes ──
+  // ── Auto-suggest SAR/QAT/KWD from AED ex_vat whenever it changes ──
   useEffect(() => {
     const exVat = toNum(form.msrp_aed_ex_vat);
     if (exVat == null || exVat < 0) {
-      setForm(f => ({ ...f, msrp_sar: f.ksa_overridden ? f.msrp_sar : '', msrp_qat: f.qat_overridden ? f.msrp_qat : '' }));
+      setForm(f => ({ ...f, msrp_sar: f.ksa_overridden ? f.msrp_sar : '', msrp_qat: f.qat_overridden ? f.msrp_qat : '', msrp_kwd: f.kwd_overridden ? f.msrp_kwd : '' }));
       return;
     }
     setForm(f => ({
       ...f,
       msrp_sar: f.ksa_overridden ? f.msrp_sar : round(suggestKSAPrice(exVat)),
       msrp_qat: f.qat_overridden ? f.msrp_qat : round(suggestQATPrice(exVat)),
+      msrp_kwd: f.kwd_overridden ? f.msrp_kwd : round(suggestKWDPrice(exVat), 3),
     }));
   }, [form.msrp_aed_ex_vat]);
 
@@ -138,6 +143,12 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
   }, [form.qat_overridden]); // intentional: msrp_aed_ex_vat omitted — handled by suggestion effect above
 
   useEffect(() => {
+    if (form.kwd_overridden) return;
+    const exVat = toNum(form.msrp_aed_ex_vat);
+    if (exVat != null && exVat >= 0) setForm(f => ({ ...f, msrp_kwd: round(suggestKWDPrice(exVat), 3) }));
+  }, [form.kwd_overridden]); // intentional: msrp_aed_ex_vat omitted — handled by suggestion effect above
+
+  useEffect(() => {
     if (!existing) writeFormCache(form.cost_currency, form.shipping_rate);
   }, [form.cost_currency, form.shipping_rate]); // existing is stable for the component's lifetime
 
@@ -147,6 +158,7 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
   const exVatVal   = toNum(form.msrp_aed_ex_vat);
   const sarVal     = toNum(form.msrp_sar);
   const qatVal     = toNum(form.msrp_qat);
+  const kwdVal     = toNum(form.msrp_kwd);
 
   // Landed cost always computed from cost inputs (regardless of override)
   const landedResult = (costVal != null && costVal >= 0 && form.cost_currency && rates?.[form.cost_currency])
@@ -213,9 +225,11 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
         msrp_aed_ex_vat:   toNum(exVat),
         msrp_sar:          toNum(toNum(form.msrp_sar)),
         msrp_qat:          toNum(toNum(form.msrp_qat)),
+        msrp_kwd:          toNum(form.msrp_kwd),
         uae_overridden:    form.uae_overridden,
         ksa_overridden:    form.ksa_overridden,
         qat_overridden:    form.qat_overridden,
+        kwd_overridden:    form.kwd_overridden,
       }, { isNew: !existing });
       setModal(null);
       onSave(itemCode);
@@ -398,8 +412,8 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
             </div>
           ) : (
             <div>
-              {/* Price hero — 3-country grid */}
-              <div style={{ display:'grid', gridTemplateColumns:'2fr 1.5fr 1.5fr', gap:1, background:t.b1, borderRadius:8, overflow:'hidden', marginBottom:12 }}>
+              {/* Price hero — 4-country grid */}
+              <div style={{ display:'grid', gridTemplateColumns:'2fr 1.4fr 1.4fr 1.4fr', gap:1, background:t.b1, borderRadius:8, overflow:'hidden', marginBottom:12 }}>
                 <div style={{ background:t.bg2, padding:'14px' }}>
                   <div style={{ fontSize:10, color:t.t4, textTransform:'uppercase', letterSpacing:'0.06em', fontFamily:'var(--font-mono)', marginBottom:5 }}>UAE (inc VAT)</div>
                   <div style={{ fontSize:20, fontWeight:500, color:t.t1, marginBottom:3 }}>
@@ -421,6 +435,14 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
                   </div>
                   <div style={{ fontSize:15, fontWeight:500, color: hasVal(form.msrp_qat) ? t.t1 : t.t4, marginBottom:3 }}>
                     {hasVal(form.msrp_qat) ? `QAR ${qatVal.toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 })}` : '—'}
+                  </div>
+                </div>
+                <div style={{ background:t.bg2, padding:'14px' }}>
+                  <div style={{ fontSize:10, color:t.t4, textTransform:'uppercase', letterSpacing:'0.06em', fontFamily:'var(--font-mono)', marginBottom:5 }}>
+                    KWT{form.kwd_overridden && <span style={{ color:t.amber, marginLeft:4 }}>↑</span>}
+                  </div>
+                  <div style={{ fontSize:15, fontWeight:500, color: hasVal(form.msrp_kwd) ? t.t1 : t.t4, marginBottom:3 }}>
+                    {hasVal(form.msrp_kwd) ? money(kwdVal, 'KWD') : '—'}
                   </div>
                 </div>
               </div>
@@ -557,6 +579,38 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
               <span style={sub}>UAE ex-VAT × 1.01 formula · Qatar has no VAT</span>
             </div>
 
+            {/* KWT */}
+            <div style={fg}>
+              <label style={lbl}>
+                KWT (KWD){' '}
+                <span style={{ color: form.kwd_overridden ? t.amber : t.green, fontWeight:400, textTransform:'none', letterSpacing:0 }}>
+                  {form.kwd_overridden ? 'overridden' : 'suggested'}
+                </span>
+              </label>
+              <div style={{ display:'flex', gap:8 }}>
+                <input
+                  type="text" inputMode="decimal"
+                  placeholder="Auto-calculated"
+                  readOnly={!form.kwd_overridden}
+                  value={form.msrp_kwd ?? ''}
+                  style={{
+                    ...inp(hasVal(form.msrp_kwd), false),
+                    flex:1,
+                    color: form.kwd_overridden ? t.t1 : t.t2,
+                    borderColor: form.kwd_overridden
+                      ? 'rgba(245,166,35,0.4)'
+                      : hasVal(form.msrp_kwd) ? 'rgba(62,207,142,0.4)' : t.b2,
+                  }}
+                  onChange={e => set('msrp_kwd', e.target.value)}
+                />
+                <button
+                  style={{ ...btnG, ...btnSm, color: form.kwd_overridden ? t.amber : t.t4 }}
+                  onClick={() => set('kwd_overridden', !form.kwd_overridden)}
+                >{form.kwd_overridden ? 'Revert' : 'Override'}</button>
+              </div>
+              <span style={sub}>UAE ex-VAT × {KWD_FACTOR} (to KWD) · Kuwait rounding · no VAT</span>
+            </div>
+
           </div>
         </div>
 
@@ -605,10 +659,12 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
               ['UAE ex VAT',   hasVal(form.msrp_aed_ex_vat)  ? `AED ${exVatVal.toFixed(2)}`       : '—'],
               ['KSA (SAR)',    hasVal(form.msrp_sar) ? `SAR ${sarVal.toFixed(2)}` : '—'],
               ['QAT (QAR)',    hasVal(form.msrp_qat) ? `QAR ${qatVal.toFixed(2)}` : '—'],
+              ['KWT (KWD)',    hasVal(form.msrp_kwd) ? money(kwdVal, 'KWD') : '—'],
               ['Gross margin', marginFmt.label],
               ...(form.uae_overridden ? [['UAE override', 'Yes — manual price']] : []),
               ...(form.ksa_overridden ? [['KSA override', 'Yes — manual price']] : []),
               ...(form.qat_overridden ? [['QAT override', 'Yes — manual price']] : []),
+              ...(form.kwd_overridden ? [['KWT override', 'Yes — manual price']] : []),
             ].map(([label, value]) => (
               <div key={label} style={{ display:'flex', justifyContent:'space-between', padding:'9px 0', borderBottom:`1px solid ${t.b1}`, fontSize:13 }}>
                 <span style={{ color:t.t3 }}>{label}</span>

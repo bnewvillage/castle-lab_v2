@@ -12,11 +12,12 @@ import { downloadXLSX } from '../../lib/xlsxExport';
 // Idempotent across repeated calls with the same %.
 function computePricesWithMarkup(item, additionalPct, ctx) {
   const p = pricesAtAdditionalMarkup(item, additionalPct, ctx);
-  if (!p) return { new_aed: null, new_sar: null, new_qat: null };
+  if (!p) return { new_aed: null, new_sar: null, new_qat: null, new_kwd: null };
   return {
     new_aed: !item.uae_overridden ? p.msrp_aed : null,
     new_sar: !item.ksa_overridden ? p.msrp_sar : null,
     new_qat: !item.qat_overridden ? p.msrp_qat : null,
+    new_kwd: !item.kwd_overridden ? p.msrp_kwd : null,
   };
 }
 
@@ -242,7 +243,7 @@ export default function GlobalMarkupExport({ setExportActions }) {
 
         const items = await fetchBrandItems(brand.brand_code);
         for (const item of items) {
-          const { new_aed, new_sar, new_qat } = computePricesWithMarkup(item, additional, { markup: brand.markup_percentage, rates });
+          const { new_aed, new_sar, new_qat, new_kwd } = computePricesWithMarkup(item, additional, { markup: brand.markup_percentage, rates });
 
           historyRows.push({
             item_code:    item.item_code,
@@ -257,15 +258,18 @@ export default function GlobalMarkupExport({ setExportActions }) {
             new_msrp_sar: new_sar,
             old_msrp_qat: item.msrp_qat ?? null,
             new_msrp_qat: new_qat,
+            old_msrp_kwd: item.msrp_kwd ?? null,
+            new_msrp_kwd: new_kwd,
           });
 
           // Only queue a write if at least one price actually changed
-          if (new_aed != null || new_sar != null || new_qat != null) {
+          if (new_aed != null || new_sar != null || new_qat != null || new_kwd != null) {
             priceUpdates.push({
               item_code: item.item_code,
               msrp_aed:  new_aed ?? item.msrp_aed,
               msrp_sar:  new_sar ?? item.msrp_sar,
               msrp_qat:  new_qat ?? item.msrp_qat,
+              msrp_kwd:  new_kwd ?? item.msrp_kwd,
             });
           }
         }
@@ -386,7 +390,7 @@ export default function GlobalMarkupExport({ setExportActions }) {
         addLog(`  ${items.length} items fetched`);
 
         for (const item of items) {
-          const { new_aed, new_sar, new_qat } = computePricesWithMarkup(item, additional, { markup: brand.markup_percentage, rates });
+          const { new_aed, new_sar, new_qat, new_kwd } = computePricesWithMarkup(item, additional, { markup: brand.markup_percentage, rates });
 
           rows.push({
             item_code: item.item_code,
@@ -394,9 +398,11 @@ export default function GlobalMarkupExport({ setExportActions }) {
             old_aed:   item.msrp_aed ?? '',
             old_sar:   item.msrp_sar ?? '',
             old_qat:   item.msrp_qat ?? '',
+            old_kwd:   item.msrp_kwd ?? '',
             new_aed:   new_aed != null ? new_aed.toFixed(2) : '',
             new_sar:   new_sar != null ? new_sar.toFixed(2) : '',
             new_qat:   new_qat != null ? new_qat.toFixed(2) : '',
+            new_kwd:   new_kwd != null ? new_kwd.toFixed(3) : '',
           });
         }
       }

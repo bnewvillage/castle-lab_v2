@@ -90,12 +90,14 @@ export function calcAllMargins(item, rates) {
 
   const ksaAED = item.msrp_sar ? item.msrp_sar * (rates['SAR'] || 0.98) : null;
   const qatAED = item.msrp_qat ? item.msrp_qat * (rates['QAR'] || 1.01) : null;
+  const kwdAED = item.msrp_kwd ? item.msrp_kwd * (rates['KWD'] || 1 / KWD_FACTOR) : null;
 
   return {
     landed_cost_aed: landed,
     uae_margin:      calcMargin(item.msrp_aed, landed),
     ksa_margin:      calcMargin(ksaAED, landed),
     qat_margin:      calcMargin(qatAED, landed),
+    kwd_margin:      calcMargin(kwdAED, landed),
     exw_margin:      calcEXWMargin(item, rates),
   };
 }
@@ -200,8 +202,64 @@ export function suggestQATPrice(msrp_aed) {
   return prettifyShelf(msrp_aed * 1.01);
 }
 
+// ── KUWAIT ───────────────────────────────────────────────────
+// Kuwait: the UAE price ex-VAT converted to KWD — no market premium, no VAT,
+// so shelf and stored agree. The dinar is pegged to a basket, not the dollar,
+// so this is a FIXED factor (about 0.0835 at the market in Oct 2026; 0.084 is
+// ~0.6% above it), reviewed by hand rather than following the rate.
+export const KWD_FACTOR = 0.084;
+
+// Dinar prices are ~12× smaller than dirham ones, so Kuwait has its own ladder
+// in the spirit of the UAE rule: round up below the prestige line, charm only
+// at round points (.900, like …99), round down above it.
+//
+//   under 1 KD     round up to 0.050
+//   1 – 5 KD       round up to 0.100
+//   5 – 100 KD     round up to 0.250; within 0.250 above a multiple of 5, snap
+//                  down to it; multiples of 5 become x4.900 / x9.900
+//   100 – 250 KD   round up to 0.500; within 1 above a multiple of 10, snap down
+//                  to it; multiples of 10 become x9.900
+//   250 KD         stays 250 — never 249.900, as 3,000 stays 3,000 in UAE
+//   250 – 500 KD   round DOWN to 5      at most 2% — 5 on 250, 10 on 500 — the
+//   500 KD +       round DOWN to 10     share UAE gives up at 5,000
+//
+// Every result fits in 2 decimals (.000 .050 .100 .250 .500 .750 .900), so
+// the ERP's 2-decimal price lists hold it exactly. A tolerance of under a fils
+// stops 2dp storage noise costing a step — 4,761.90 × 0.084 = 399.9996 is 400 —
+// while a genuine target a whole fils off is not moved (the noise is ≤ 0.0004).
+export const KWD_PRESTIGE_5_FROM  = 250;
+export const KWD_PRESTIGE_10_FROM = 500;
+const KWD_TOL = 0.0009;
+const r3 = (v) => Math.round(v * 1000) / 1000;
+const kCeil  = (v, step) => r3(Math.ceil((v - KWD_TOL) / step) * step);
+const kFloor = (v, step) => r3(Math.floor((v + KWD_TOL) / step) * step);
+
+export function prettifyKwd(target) {
+  if (target == null) return null;
+  if (target >= KWD_PRESTIGE_10_FROM) return kFloor(target, 10);
+  if (target >= KWD_PRESTIGE_5_FROM)  return kFloor(target, 5);
+  const c = target < 1 ? kCeil(target, 0.05)
+          : target < 5 ? kCeil(target, 0.1)
+          : target < 100 ? kCeil(target, 0.25)
+          : kCeil(target, 0.5);
+  if (c >= KWD_PRESTIGE_5_FROM) return KWD_PRESTIGE_5_FROM;
+  if (c < 5) return c;
+  const [unit, snap] = c < 100 ? [5, 0.25] : [10, 1];
+  const mod     = r3(c % unit);
+  const snapped = mod <= snap + 1e-9 ? r3(c - mod) : c;
+  return r3(snapped % unit) === 0 ? r3(snapped - 0.1) : snapped;
+}
+
+// Kuwait: UAE ex-VAT × KWD_FACTOR, Kuwait ladder. No VAT.
+export function suggestKWDPrice(msrp_aed) {
+  if (msrp_aed == null) return null;
+  return prettifyKwd(msrp_aed * KWD_FACTOR);
+}
+
+const pf3 = v => v != null ? parseFloat(v.toFixed(3)) : null;
+
 /**
- * All six market prices from an unrounded base shelf target.
+ * All eight market prices from an unrounded base shelf target.
  *
  *   real_msrp_*  base markup only
  *   msrp_*       with the brand's additional markup — the selling prices
@@ -209,7 +267,7 @@ export function suggestQATPrice(msrp_aed) {
  * Both UAE prices round once, from the unrounded target. The additional markup
  * applies to that target, never to the already-rounded base: rounding down twice
  * would stack, e.g. a 7,598 base + 5% → 7,500 × 1.05 = 7,875 → 7,800 instead of
- * 7,978 → 7,900. KSA and Qatar derive from the rounded UAE price.
+ * 7,978 → 7,900. KSA, Qatar and Kuwait derive from the rounded UAE price.
  */
 export function msrpsFromBaseShelf(baseShelf, additionalPct) {
   if (baseShelf == null) return null;
@@ -221,9 +279,11 @@ export function msrpsFromBaseShelf(baseShelf, additionalPct) {
     real_msrp_aed,
     real_msrp_sar: pf2(suggestKSAPrice(real_msrp_aed)),
     real_msrp_qat: pf2(suggestQATPrice(real_msrp_aed)),
+    real_msrp_kwd: pf3(suggestKWDPrice(real_msrp_aed)),
     msrp_aed,
     msrp_sar: pf2(suggestKSAPrice(msrp_aed)),
     msrp_qat: pf2(suggestQATPrice(msrp_aed)),
+    msrp_kwd: pf3(suggestKWDPrice(msrp_aed)),
   };
 }
 
@@ -255,18 +315,24 @@ export function applyAdditionalMarkupUAE(realMsrpAed, additionalPct) {
  * recomputing from source would apply today's exchange rate as a side effect
  * of a markup change.
  *
- * @returns {{ msrp_aed, msrp_sar, msrp_qat, fromSource } | null}
+ * @returns {{ msrp_aed, msrp_sar, msrp_qat, msrp_kwd, fromSource } | null}
  */
 export function pricesAtAdditionalMarkup(item, additionalPct, { markup, rates }) {
   const storedBase = toNum(item.real_msrp_aed ?? item.msrp_aed);
   if (!storedBase) return null;
   const target = itemBaseShelf(item, { markup, rates });
   if (target != null && pf2(prettifyShelf(target) / 1.05) === pf2(storedBase)) {
-    const { msrp_aed, msrp_sar, msrp_qat } = msrpsFromBaseShelf(target, additionalPct);
-    return { msrp_aed, msrp_sar, msrp_qat, fromSource: true };
+    const { msrp_aed, msrp_sar, msrp_qat, msrp_kwd } = msrpsFromBaseShelf(target, additionalPct);
+    return { msrp_aed, msrp_sar, msrp_qat, msrp_kwd, fromSource: true };
   }
   const msrp_aed = pf2(applyAdditionalMarkupUAE(storedBase, additionalPct));
-  return { msrp_aed, msrp_sar: pf2(suggestKSAPrice(msrp_aed)), msrp_qat: pf2(suggestQATPrice(msrp_aed)), fromSource: false };
+  return {
+    msrp_aed,
+    msrp_sar: pf2(suggestKSAPrice(msrp_aed)),
+    msrp_qat: pf2(suggestQATPrice(msrp_aed)),
+    msrp_kwd: pf3(suggestKWDPrice(msrp_aed)),
+    fromSource: false,
+  };
 }
 
 // ── EMPLOYEE PRICE ────────────────────────────────────────────
@@ -322,6 +388,7 @@ export function calcProjectPrice({ cost, cost_currency, shipping_rate, customs_d
     msrp_aed_ex_vat:       exVat,
     msrp_sar:              suggestKSAPrice(exVat) != null ? parseFloat(suggestKSAPrice(exVat).toFixed(2)) : null,
     msrp_qat:              suggestQATPrice(exVat) != null ? parseFloat(suggestQATPrice(exVat).toFixed(2)) : null,
+    msrp_kwd:              pf3(suggestKWDPrice(exVat)),
     landed_cost_aed:       parseFloat(landedAED.toFixed(2)),
     target_margin_pct:     parseFloat((margin * 100).toFixed(2)),
     cost_ex_customs_src:   parseFloat(costExCustomsSrc.toFixed(2)),

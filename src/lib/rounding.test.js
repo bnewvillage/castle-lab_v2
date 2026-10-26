@@ -265,6 +265,7 @@ describe('planRounding — the whole pass', () => {
       msrp_aed: it.msrp_aed, real_msrp_aed: it.real_msrp_aed,
       msrp_sar: it.msrp_sar, real_msrp_sar: it.real_msrp_sar,
       msrp_qat: it.msrp_qat, real_msrp_qat: it.real_msrp_qat,
+      msrp_kwd: null, real_msrp_kwd: null,                 // no Kuwait price yet
     });
   });
 
@@ -443,11 +444,12 @@ describe('planKsaRecalc — KSA from UAE at the current factor', () => {
     for (const c of changes) expect(Object.keys(c.set).every(k => k.endsWith('_sar'))).toBe(true);
   });
 
-  test('records all six prices it read, for the compare-and-set on apply', () => {
+  test('records all eight prices it read, for the compare-and-set on apply', () => {
     const it = item();
     expect(planKsaRecalc([it]).changes[0].expect).toEqual({
       msrp_aed: it.msrp_aed, real_msrp_aed: it.real_msrp_aed, msrp_sar: it.msrp_sar,
       real_msrp_sar: it.real_msrp_sar, msrp_qat: it.msrp_qat, real_msrp_qat: it.real_msrp_qat,
+      msrp_kwd: null, real_msrp_kwd: null,
     });
   });
 

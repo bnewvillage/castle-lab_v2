@@ -23,6 +23,9 @@ const PRICE_REPORTS = [
   { key: 'aed', name: 'PRICE-AED_ValidFromLatest', dbField: 'msrp_aed', currency: 'AED' },
   { key: 'sar', name: 'PRICE-SAR_ValidFromLatest', dbField: 'msrp_sar', currency: 'SAR' },
   { key: 'qar', name: 'PRICE-QAR_ValidFromLatest', dbField: 'msrp_qat', currency: 'QAR' },
+  // Until this report exists in the ERP it is skipped with "not set up in the
+  // ERP yet" and the other lists export as normal (fetchReportsIndependently).
+  { key: 'kwd', name: 'PRICE-KWD_ValidFromLatest', dbField: 'msrp_kwd', currency: 'KWD' },
 ];
 
 async function fetchReport(email, password, report_name) {
@@ -222,6 +225,7 @@ export default function ERPAutomation({ view, creds, setCreds }) {
           msrp_aed:   db?.msrp_aed ?? '',
           msrp_sar:   db?.msrp_sar ?? '',
           msrp_qat:   db?.msrp_qat ?? '',
+          msrp_kwd:   db?.msrp_kwd ?? '',
           match_type: byCode ? 'item_code' : byBar ? 'barcode' : 'no_match',
           _missing:   !db,
         };
@@ -229,7 +233,7 @@ export default function ERPAutomation({ view, creds, setCreds }) {
 
       // Report columns first, then the ones we appended — keeps the sheet
       // recognisable next to the ERP view.
-      const added    = ['barcode', 'msrp_aed', 'msrp_sar', 'msrp_qat', 'match_type'];
+      const added    = ['barcode', 'msrp_aed', 'msrp_sar', 'msrp_qat', 'msrp_kwd', 'match_type'];
       const original = Object.keys(rows[0]).filter(k => !added.includes(k));
       const matched  = filled.filter(r => !r._missing).length;
       addLog(`${matched.toLocaleString()} of ${filled.length.toLocaleString()} priced from the DB.`);
@@ -446,6 +450,7 @@ export default function ERPAutomation({ view, creds, setCreds }) {
           msrp_aed:   r.msrp_aed  ?? '',
           msrp_sar:   r.msrp_sar  ?? '',
           msrp_qat:   r.msrp_qat  ?? '',
+          msrp_kwd:   r.msrp_kwd  ?? '',
         }));
 
       addLog(`${rows.length.toLocaleString()} of those exist in ERP.`);
@@ -508,7 +513,7 @@ export default function ERPAutomation({ view, creds, setCreds }) {
           <div>
             <div style={{ ...groupHead, marginBottom: 4 }}>Price Export</div>
             <div style={{ fontSize: 12, color: t.t4, marginBottom: expLog.length ? 0 : 4 }}>
-              Fetch the three ERP price list reports and generate upload-ready CSVs with updated rates.
+              Fetch the ERP price list reports (AED, SAR, QAR, KWD) and generate upload-ready files with updated rates. A list the ERP doesn't have yet is skipped; the others still export.
             </div>
           </div>
           <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0, marginLeft:16 }}>
@@ -598,7 +603,7 @@ export default function ERPAutomation({ view, creds, setCreds }) {
             )}
             {covResult.notInErp.length > 0 && (
               <button
-                onClick={() => downloadXLSX(covResult.notInErp, `db_not_in_erp_${covResult.scoped ? covResult.brands.join('-') + '_' : ''}${today}.xlsx`, { headers: ['item_code', 'item_name', 'brand_code', 'barcode', 'msrp_aed', 'msrp_sar', 'msrp_qat'] })}
+                onClick={() => downloadXLSX(covResult.notInErp, `db_not_in_erp_${covResult.scoped ? covResult.brands.join('-') + '_' : ''}${today}.xlsx`, { headers: ['item_code', 'item_name', 'brand_code', 'barcode', 'msrp_aed', 'msrp_sar', 'msrp_qat', 'msrp_kwd'] })}
                 style={{ ...btnG, display: 'flex', alignItems: 'center', gap: 6 }}
               >↓ XLSX ({covResult.notInErp.length.toLocaleString()} items)</button>
             )}
@@ -619,7 +624,7 @@ export default function ERPAutomation({ view, creds, setCreds }) {
           <div>
             <div style={{ ...groupHead, marginBottom: 4 }}>Stock Without Price</div>
             <div style={{ fontSize: 12, color: t.t4, marginBottom: stkLog.length ? 0 : 4 }}>
-              Pull the ERP&apos;s in-stock-without-price report and fill in AED, SAR and QAR from the pricing master.
+              Pull the ERP&apos;s in-stock-without-price report and fill in AED, SAR, QAR and KWD from the pricing master.
             </div>
           </div>
           <RunBtn label="Fetch & Fill" loading={stkState === 'loading'} disabled={!isConnected} onClick={handleStockNoPrice} />
@@ -672,7 +677,7 @@ export default function ERPAutomation({ view, creds, setCreds }) {
               <StatPill label="DB items" value={matchResult.total.toLocaleString()} />
             </div>
             <button
-              onClick={() => downloadXLSX(matchResult.rows, `unpriced_items_${today}.xlsx`, { headers: ['item_code', 'item_name', 'brand_code', 'barcode', 'msrp_aed', 'msrp_sar', 'msrp_qat'] })}
+              onClick={() => downloadXLSX(matchResult.rows, `unpriced_items_${today}.xlsx`, { headers: ['item_code', 'item_name', 'brand_code', 'barcode', 'msrp_aed', 'msrp_sar', 'msrp_qat', 'msrp_kwd'] })}
               style={{ ...btnG, display: 'flex', alignItems: 'center', gap: 6 }}
             >↓ XLSX ({matchResult.total.toLocaleString()} items)</button>
           </div>

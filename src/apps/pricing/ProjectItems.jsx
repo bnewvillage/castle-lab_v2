@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchProjectItems, saveProjectItem, deleteProjectItem, bulkUpdateProjectItems } from '../../lib/db';
-import { calcProjectPrice, formatMargin, MARGIN_COLORS, suggestKSAPrice, suggestQATPrice, DEFAULT_PROJECT_MARGIN_PCT } from '../../lib/pricing';
+import { calcProjectPrice, formatMargin, MARGIN_COLORS, suggestKSAPrice, suggestQATPrice, suggestKWDPrice, DEFAULT_PROJECT_MARGIN_PCT } from '../../lib/pricing';
 import { BulkEditBar, BulkEditModal } from './ProjectBulkEdit';
 import ProjectItemForm from './ProjectItemForm';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead } from './styles';
@@ -41,11 +41,12 @@ const SORT_HEADERS = [
   { label: 'Ex VAT (AED)', key: 'msrp_aed_ex_vat' },
   { label: 'KSA (SAR)',    key: 'msrp_sar' },
   { label: 'QAT (QAR)',   key: 'msrp_qat' },
+  { label: 'KWT (KWD)',   key: 'msrp_kwd' },
   { label: 'Margin',      key: 'target_margin_pct' },
   { label: '',             key: null },
 ];
 
-const GRID_COLS = '32px 145px 1fr 105px 125px 115px 110px 110px 80px auto';
+const GRID_COLS = '32px 145px 1fr 105px 125px 115px 110px 110px 110px 80px auto';
 
 // ── ROOT ──────────────────────────────────────────────────────
 export default function ProjectItems({ rates, setExportActions, onToast, isActive, refreshKey }) {
@@ -134,6 +135,7 @@ export default function ProjectItems({ rates, setExportActions, onToast, isActiv
           msrp_aed_ex_vat:   exVat,
           msrp_sar: item.ksa_overridden ? item.msrp_sar : round(suggestKSAPrice(exVat)),
           msrp_qat: item.qat_overridden ? item.msrp_qat : round(suggestQATPrice(exVat)),
+          msrp_kwd: item.kwd_overridden ? item.msrp_kwd : round(suggestKWDPrice(exVat), 3),
         };
       });
       await bulkUpdateProjectItems(updates);
@@ -338,6 +340,10 @@ export default function ProjectItems({ rates, setExportActions, onToast, isActiv
                   <span style={{ fontSize:12, color:t.t3, fontFamily:'var(--font-mono)' }}>
                     {money(item.msrp_qat, 'QAR', 2)}
                     {item.qat_overridden && <span style={{ fontSize:9, color:t.amber, marginLeft:4 }}>↑</span>}
+                  </span>
+                  <span style={{ fontSize:12, color:t.t3, fontFamily:'var(--font-mono)' }}>
+                    {money(item.msrp_kwd, 'KWD')}
+                    {item.kwd_overridden && <span style={{ fontSize:9, color:t.amber, marginLeft:4 }}>↑</span>}
                   </span>
                   <span style={{ fontSize:12, color:t.t3, fontFamily:'var(--font-mono)' }}>
                     {item.target_margin_pct ?? DEFAULT_PROJECT_MARGIN_PCT}%

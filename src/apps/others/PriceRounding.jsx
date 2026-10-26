@@ -4,8 +4,8 @@ import { planRounding, MARKETS } from '../../lib/rounding';
 import { t, inp, btnW, btnG, lbl, groupBox, groupHead } from '../pricing/styles';
 import { useAuth } from '../../lib/AuthContext';
 import { downloadXLSX } from '../../lib/xlsxExport';
-import { KSA_FACTOR } from '../../lib/pricing';
-import KsaRecalc from './KsaRecalc';
+import { KSA_FACTOR, KWD_FACTOR } from '../../lib/pricing';
+import MarketRecalc from './MarketRecalc';
 
 const RULE = [
   ['under 3,000',   'round up to 5, near-hundred snap, hundreds become …99 — the 3,000 mark stays 3,000'],
@@ -111,12 +111,16 @@ export default function PriceRounding() {
         ))}
         <div style={{ fontSize: 12, color: t.t4, marginTop: 10, lineHeight: 1.6 }}>
           A brand's additional markup goes on the unrounded base, so UAE is rounded once. KSA = UAE ex-VAT × {KSA_FACTOR}
-          (to SAR) + 15% VAT; Qatar = UAE ex-VAT × 1.01, no VAT — both from the rounded UAE price. Project items are not
-          included — they are quotes. Each one picks up the rule the next time it is saved.
+          (to SAR) + 15% VAT; Qatar = UAE ex-VAT × 1.01, no VAT; Kuwait = UAE ex-VAT × {KWD_FACTOR} (to KWD) on its own
+          ladder (round up below 250 KD with .900 at multiples of 5 and 10; round down to 5 from 250 KD and to 10
+          from 500 KD), no VAT — all from the rounded UAE price. Project items are not included — they are quotes.
+          Each one picks up the rule the next time it is saved.
         </div>
       </div>
 
-      <KsaRecalc />
+      <MarketRecalc market="kwd" />
+
+      <MarketRecalc market="sar" />
 
       <div style={groupBox(false)}>
         <div style={{ ...groupHead, marginBottom: 6 }}>Re-round the catalogue</div>
@@ -173,7 +177,7 @@ export default function PriceRounding() {
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.entries(MARKETS).map(([key, m]) => (
+                  {Object.entries(MARKETS).filter(([key]) => plan.tally[key]).map(([key, m]) => (
                     <tr key={key}>
                       <td style={{ ...cell, color: t.t2 }}>{m.label}</td>
                       {STATUS_COLS.map(([k, , color]) => {

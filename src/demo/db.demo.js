@@ -47,6 +47,9 @@ function stripItem(item) {
     uae_overridden:          item.uae_overridden ?? false,
     ksa_overridden:          item.ksa_overridden ?? false,
     qat_overridden:          item.qat_overridden ?? false,
+    ...('msrp_kwd' in item       ? { msrp_kwd: toNum(item.msrp_kwd) } : {}),
+    ...('real_msrp_kwd' in item  ? { real_msrp_kwd: toNum(item.real_msrp_kwd) } : {}),
+    ...('kwd_overridden' in item ? { kwd_overridden: !!item.kwd_overridden } : {}),
     cost_source:             item.cost_source || null,
     created_at:              item.created_at ?? new Date().toISOString(),
     updated_at:              new Date().toISOString(),
@@ -250,7 +253,7 @@ export async function fetchAllPricesForExport() {
   return store.pricingMaster
     .filter(i => i.item_code)
     .sort((a, b) => a.item_code.localeCompare(b.item_code))
-    .map(i => ({ item_code: i.item_code, barcode: i.barcode, msrp_aed: i.msrp_aed, msrp_sar: i.msrp_sar, msrp_qat: i.msrp_qat }));
+    .map(i => ({ item_code: i.item_code, barcode: i.barcode, msrp_aed: i.msrp_aed, msrp_sar: i.msrp_sar, msrp_qat: i.msrp_qat, msrp_kwd: i.msrp_kwd ?? null }));
 }
 
 // The Price Export's DB side: same fields as the live query.
@@ -260,8 +263,8 @@ export async function fetchAllItemsForErpAutomation(brandCodes) {
   return store.pricingMaster
     .filter(i => i.item_code && (!filtered || brandCodes.includes(i.brand_code)))
     .sort((a, b) => a.item_code.localeCompare(b.item_code))
-    .map(({ item_code, item_name, brand_code, barcode, msrp_aed, msrp_sar, msrp_qat }) =>
-      ({ item_code, item_name, brand_code, barcode: barcode ?? null, msrp_aed, msrp_sar, msrp_qat }));
+    .map(({ item_code, item_name, brand_code, barcode, msrp_aed, msrp_sar, msrp_qat, msrp_kwd }) =>
+      ({ item_code, item_name, brand_code, barcode: barcode ?? null, msrp_aed, msrp_sar, msrp_qat, msrp_kwd: msrp_kwd ?? null }));
 }
 
 export async function fetchBrandItems(brandCode) {
@@ -282,9 +285,11 @@ export async function bulkUpdateMarkupPrices(updates, updatedBy, updatedAt) {
     if (u.msrp_aed != null) item.msrp_aed = u.msrp_aed;
     if (u.msrp_sar != null) item.msrp_sar = u.msrp_sar;
     if (u.msrp_qat != null) item.msrp_qat = u.msrp_qat;
+    if (u.msrp_kwd != null) item.msrp_kwd = u.msrp_kwd;
     if (u.real_msrp_aed != null) item.real_msrp_aed = u.real_msrp_aed;
     if (u.real_msrp_sar != null) item.real_msrp_sar = u.real_msrp_sar;
     if (u.real_msrp_qat != null) item.real_msrp_qat = u.real_msrp_qat;
+    if (u.real_msrp_kwd != null) item.real_msrp_kwd = u.real_msrp_kwd;
     item.updated_by = by;
     item.updated_at = at;
   }
@@ -336,6 +341,7 @@ export async function fetchBatchItems(batchId, limit = 20, offset = 0) {
       old_msrp_aed: h.old_msrp_aed, new_msrp_aed: h.new_msrp_aed,
       old_msrp_sar: h.old_msrp_sar, new_msrp_sar: h.new_msrp_sar,
       old_msrp_qat: h.old_msrp_qat, new_msrp_qat: h.new_msrp_qat,
+      old_msrp_kwd: h.old_msrp_kwd, new_msrp_kwd: h.new_msrp_kwd,
     }));
 }
 
@@ -349,6 +355,7 @@ export async function fetchAllBatchItems(batchId) {
       old_msrp_aed: h.old_msrp_aed, new_msrp_aed: h.new_msrp_aed,
       old_msrp_sar: h.old_msrp_sar, new_msrp_sar: h.new_msrp_sar,
       old_msrp_qat: h.old_msrp_qat, new_msrp_qat: h.new_msrp_qat,
+      old_msrp_kwd: h.old_msrp_kwd, new_msrp_kwd: h.new_msrp_kwd,
       changed_at: h.changed_at, changed_by: h.changed_by,
     }));
 }
@@ -360,9 +367,11 @@ export async function rollbackBatch(batchId, userEmail) {
   for (const h of rows) {
     const item = store.pricingMaster.find(i => i.item_code === h.item_code);
     if (!item) continue;
-    if (h.old_msrp_aed != null) item.msrp_aed = h.old_msrp_aed;
-    if (h.old_msrp_sar != null) item.msrp_sar = h.old_msrp_sar;
-    if (h.old_msrp_qat != null) item.msrp_qat = h.old_msrp_qat;
+    // As the live rollback_batch: restore a market only where the batch
+    // recorded a new value for it — and restore it even to empty, so a fill is undone.
+    for (const k of ['aed', 'sar', 'qat', 'kwd']) {
+      if (h[`new_msrp_${k}`] != null) item[`msrp_${k}`] = h[`old_msrp_${k}`] ?? null;
+    }
     item.updated_by = userEmail;
     item.updated_at = new Date().toISOString();
   }
@@ -397,6 +406,8 @@ export async function saveProjectItem(item, { isNew = false } = {}) {
     uae_overridden:    item.uae_overridden ?? false,
     ksa_overridden:    item.ksa_overridden ?? false,
     qat_overridden:    item.qat_overridden ?? false,
+    ...('msrp_kwd' in item       ? { msrp_kwd: toNum(item.msrp_kwd) } : {}),
+    ...('kwd_overridden' in item ? { kwd_overridden: !!item.kwd_overridden } : {}),
     updated_at:        now,
     updated_by:        DEMO_USER.email,
   };
@@ -471,7 +482,7 @@ export async function fetchErpCoverage(brandCodes) {
   const notInErp = inScope.filter(i => missing.has(i.item_code)).map(i => ({
     item_code: i.item_code, item_name: i.item_name, brand_code: i.brand_code,
     barcode: i.barcode ?? null,
-    msrp_aed: i.msrp_aed ?? null, msrp_sar: i.msrp_sar ?? null, msrp_qat: i.msrp_qat ?? null,
+    msrp_aed: i.msrp_aed ?? null, msrp_sar: i.msrp_sar ?? null, msrp_qat: i.msrp_qat ?? null, msrp_kwd: i.msrp_kwd ?? null,
   }));
   return {
     erpTotal: store.pricingMaster.length - missing.size,
@@ -525,11 +536,11 @@ export async function fetchAllItemsForRounding() {
   return store.pricingMaster.map(clone);
 }
 
-// Mirrors apply_price_rounding: compare-and-set on all six prices, history
-// written only for rows that actually changed.
-export async function applyPriceRounding(batchId, changes, onProgress) {
+// Mirrors apply_price_rounding: compare-and-set on all eight prices, history
+// written only for rows that actually changed, under the run's own type.
+export async function applyPriceRounding(batchId, changes, onProgress, operation = 'rounding_rule') {
   await wait(200);
-  const FIELDS = ['msrp_aed', 'msrp_sar', 'msrp_qat', 'real_msrp_aed', 'real_msrp_sar', 'real_msrp_qat'];
+  const FIELDS = ['msrp_aed', 'msrp_sar', 'msrp_qat', 'msrp_kwd', 'real_msrp_aed', 'real_msrp_sar', 'real_msrp_qat', 'real_msrp_kwd'];
   const eq = (a, b) => (a == null && b == null) || (a != null && b != null && Number(a) === Number(b));
   const now = new Date().toISOString();
   let id = store.priceHistory.reduce((m, h) => Math.max(m, h.id || 0), 0);
@@ -537,14 +548,15 @@ export async function applyPriceRounding(batchId, changes, onProgress) {
   for (const c of changes) {
     const item = store.pricingMaster.find(i => i.item_code === c.item_code);
     if (!item || !FIELDS.every(f => eq(item[f] ?? null, c.expect[f] ?? null))) continue;
-    const before = { msrp_aed: item.msrp_aed ?? null, msrp_sar: item.msrp_sar ?? null, msrp_qat: item.msrp_qat ?? null };
+    const before = { msrp_aed: item.msrp_aed ?? null, msrp_sar: item.msrp_sar ?? null, msrp_qat: item.msrp_qat ?? null, msrp_kwd: item.msrp_kwd ?? null };
     Object.assign(item, c.set, { updated_at: now, updated_by: DEMO_USER.email });
     store.priceHistory.push({
       id: ++id, item_code: item.item_code, brand_code: item.brand_code, batch_id: batchId,
-      operation_type: 'rounding_rule', changed_at: now, changed_by: DEMO_USER.email,
+      operation_type: operation, changed_at: now, changed_by: DEMO_USER.email,
       old_msrp_aed: before.msrp_aed, new_msrp_aed: 'msrp_aed' in c.set ? item.msrp_aed : null,
       old_msrp_sar: before.msrp_sar, new_msrp_sar: 'msrp_sar' in c.set ? item.msrp_sar : null,
       old_msrp_qat: before.msrp_qat, new_msrp_qat: 'msrp_qat' in c.set ? item.msrp_qat : null,
+      old_msrp_kwd: before.msrp_kwd, new_msrp_kwd: 'msrp_kwd' in c.set ? item.msrp_kwd : null,
     });
     applied++;
   }

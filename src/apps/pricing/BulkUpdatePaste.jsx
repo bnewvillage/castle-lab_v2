@@ -37,8 +37,9 @@ const PRICE_COLS = [
   { k:'msrp_aed', label:'UAE price', flag:'uae_overridden' },
   { k:'msrp_sar', label:'KSA price', flag:'ksa_overridden' },
   { k:'msrp_qat', label:'QAT price', flag:'qat_overridden' },
+  { k:'msrp_kwd', label:'KWT price', flag:'kwd_overridden' },
 ];
-const REAL_OF = { msrp_aed:'real_msrp_aed', msrp_sar:'real_msrp_sar', msrp_qat:'real_msrp_qat' };
+const REAL_OF = { msrp_aed:'real_msrp_aed', msrp_sar:'real_msrp_sar', msrp_qat:'real_msrp_qat', msrp_kwd:'real_msrp_kwd' };
 
 // Only these feed the price calculation. Editing a name or barcode must never
 // trigger a price rewrite off whatever happens to be stored.

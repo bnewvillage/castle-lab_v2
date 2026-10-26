@@ -36,7 +36,7 @@
 // Today it goes on the unrounded target and UAE rounds once.
 // ─────────────────────────────────────────────────────────────
 import {
-  prettifyShelf, suggestKSAPrice, suggestQATPrice, itemBaseShelf, msrpsFromBaseShelf,
+  prettifyShelf, suggestKSAPrice, suggestQATPrice, suggestKWDPrice, itemBaseShelf, msrpsFromBaseShelf,
   PRESTIGE_50_FROM, PRESTIGE_100_FROM,
 } from './pricing';
 import { toNum } from './num';
@@ -45,14 +45,21 @@ export const MARKETS = {
   aed: { label: 'UAE',   field: 'msrp_aed', real: 'real_msrp_aed', flag: 'uae_overridden', vat: 1.05, oldSnap: true  },
   sar: { label: 'KSA',   field: 'msrp_sar', real: 'real_msrp_sar', flag: 'ksa_overridden', vat: 1.15, oldSnap: false },
   qat: { label: 'Qatar', field: 'msrp_qat', real: 'real_msrp_qat', flag: 'qat_overridden', vat: 1,    oldSnap: false },
+  // Kuwait has no old rule to move off — it is filled and kept by planMarketRecalc.
+  kwd: { label: 'Kuwait', field: 'msrp_kwd', real: 'real_msrp_kwd', flag: 'kwd_overridden', vat: 1,   oldSnap: false, step: 0.001 },
 };
 
 const round2 = (v) => Math.round(v * 100) / 100;
-const same   = (a, b) => a != null && b != null && round2(a) === round2(b);
+const round3 = (v) => Math.round(v * 1000) / 1000;
+// To the fils: dinar prices carry 3 decimals; the others are 2dp, so for them
+// this is the same comparison as to 2 places.
+const same   = (a, b) => a != null && b != null && round3(a) === round3(b);
 // Shelf price for display. Stored prices are ex-VAT at 2dp, so ×VAT carries a
 // fils of drift (2,869.57 × 1.15 = 3,300.0055); every real shelf price is a
 // multiple of 0.05, so snap to it.
-const shelfOf = (stored, vat) => round2(Math.round((toNum(stored) * vat) / 0.05) * 0.05);
+const shelfOf = (stored, vat, step = 0.05) => step < 0.01
+  ? round3(toNum(stored) * vat)
+  : round2(Math.round((toNum(stored) * vat) / step) * step);
 
 // ── The old rule, bit-for-bit (no float tolerance — it had none) ──
 export function legacyUaeShelf(t) {
@@ -71,6 +78,7 @@ const legacyKSA = (aed) => aed == null ? null : round2(legacyMarketShelf(aed * 1
 const legacyQAT = (aed) => aed == null ? null : round2(legacyMarketShelf(aed * 1.01));
 const freshKSA  = (aed) => aed == null ? null : round2(suggestKSAPrice(aed));
 const freshQAT  = (aed) => aed == null ? null : round2(suggestQATPrice(aed));
+const freshKWD  = (aed) => aed == null ? null : round3(suggestKWDPrice(aed));
 
 // The first deploy of the new rule had float tolerance only (no allowance for
 // 2dp storage noise), so its additional-markup pass could land a step low.
@@ -249,11 +257,21 @@ export function planRounding(items, { rates, rules, cutoff } = {}) {
 const KSA_FACTOR_BEFORE = 1.03;
 const ksaBefore = (aed) => round2(prettifyShelf(aed * KSA_FACTOR_BEFORE * 1.15) / 1.15);
 
+// How each recalculable market is derived from UAE, and which stored prices
+// count as "following" their UAE price (moved by default).
+const RECALC = {
+  // KSA: the previous factor (current or old rounding) or the current one.
+  sar: { fresh: freshKSA, follows: (s, aed) => same(s, ksaBefore(aed)) || same(s, legacyKSA(aed)) || same(s, freshKSA(aed)) },
+  // Kuwait: new — only the current rule has ever made a Kuwait price.
+  kwd: { fresh: freshKWD, follows: (s, aed) => same(s, freshKWD(aed)) },
+};
+
 /**
- * Re-derives KSA prices from their stored UAE price with the current rule
- * (suggestKSAPrice — KSA_FACTOR, rounding). Nothing is inferred: the UAE price
- * is the input, so the result is exactly what saving the item today would
- * give its KSA price. UAE and Qatar are not touched. Pure: no I/O.
+ * Re-derives one market's prices (KSA or Kuwait) from their stored UAE price
+ * with the current rule. Nothing is inferred: the UAE price is the input, so
+ * the result is exactly what saving the item today would give that market.
+ * No other market is touched. A market with no price yet (Kuwait at launch) is
+ * filled. Pure: no I/O.
  *
  * Only KSA prices that FOLLOW their UAE price today are moved by default — ones
  * that equal what the previous factor (current or old rounding) or the current
@@ -269,10 +287,9 @@ const ksaBefore = (aed) => round2(prettifyShelf(aed * KSA_FACTOR_BEFORE * 1.15) 
  *        moved only with includeOutOfStep) · baseOnly (only real_msrp_sar moves)
  *        · same · overridden · noUae
  */
-export function planKsaRecalc(items, { includeOutOfStep = false } = {}) {
-  const m = MARKETS.sar;
-  const follows = (stored, aed) =>
-    same(stored, ksaBefore(aed)) || same(stored, legacyKSA(aed)) || same(stored, freshKSA(aed));
+export function planMarketRecalc(items, key, { includeOutOfStep = false } = {}) {
+  const m = MARKETS[key];
+  const { fresh, follows } = RECALC[key];
   const tally = { change: 0, outOfStep: 0, baseOnly: 0, same: 0, overridden: 0, noUae: 0 };
   const changes = [], outOfStep = [];
   for (const item of items) {
@@ -280,10 +297,10 @@ export function planKsaRecalc(items, { includeOutOfStep = false } = {}) {
     const aed = toNum(item.msrp_aed);
     if (aed == null) { tally.noUae++; continue; }
     const set = {}, lines = [];
-    const next = round2(suggestKSAPrice(aed));
+    const next = fresh(aed);
     let stepped = false;
     if (!same(next, item[m.field])) {
-      const line = { market: 'sar', before: shelfOf(item[m.field], m.vat), after: shelfOf(next, m.vat), status: 'change' };
+      const line = { market: key, before: item[m.field] == null ? null : shelfOf(item[m.field], m.vat, m.step), after: shelfOf(next, m.vat, m.step), status: 'change' };
       if (item[m.field] == null || follows(item[m.field], aed)) {
         set[m.field] = next; lines.push(line);
       } else {
@@ -294,14 +311,14 @@ export function planKsaRecalc(items, { includeOutOfStep = false } = {}) {
     }
     const realAed = toNum(item.real_msrp_aed);
     if (realAed != null) {
-      const realNext = round2(suggestKSAPrice(realAed));
+      const realNext = fresh(realAed);
       if (!same(realNext, item[m.real]) && (item[m.real] == null || follows(item[m.real], realAed) || includeOutOfStep)) {
         set[m.real] = realNext;
       }
     }
     if (stepped) tally.outOfStep++;
     if (!Object.keys(set).length) { if (!stepped) tally.same++; continue; }
-    // A real_msrp_sar-only change is still written, though no shelf price moves.
+    // A base-price-only change is still written, though no shelf price moves.
     if (!stepped) tally[lines.length ? 'change' : 'baseOnly']++;
     changes.push({
       item_code:  item.item_code,
@@ -317,3 +334,6 @@ export function planKsaRecalc(items, { includeOutOfStep = false } = {}) {
   }
   return { changes, outOfStep, tally, scanned: items.length };
 }
+
+export const planKsaRecalc = (items, opts) => planMarketRecalc(items, 'sar', opts);
+export const planKwdRecalc = (items, opts) => planMarketRecalc(items, 'kwd', opts);

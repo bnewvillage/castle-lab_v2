@@ -12,6 +12,7 @@ const OP_LABELS = {
   markup_change:  'Markup Change',
   rounding_rule:  'Rounding Rule',
   ksa_recalc:     'KSA Recalculation',
+  kwd_recalc:     'Kuwait Recalculation',
 };
 
 const OP_COLORS = {
@@ -21,6 +22,7 @@ const OP_COLORS = {
   markup_change: '#c084fc',
   rounding_rule: t.green,
   ksa_recalc:    t.blue,
+  kwd_recalc:    t.blue,
 };
 
 function fmt(val) {
@@ -149,7 +151,7 @@ function BatchCard({ batch, isViewer, user, onRollbackDone }) {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr>
-                    {['Item code', 'Brand', 'AED', 'SAR', 'QAT'].map(h => (
+                    {['Item code', 'Brand', 'AED', 'SAR', 'QAT', 'KWD'].map(h => (
                       <th key={h} style={{ padding: '8px 14px', textAlign: h === 'Item code' || h === 'Brand' ? 'left' : 'right', fontSize: 10, color: t.t4, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: `1px solid ${t.b1}`, background: t.bg3, whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
@@ -162,6 +164,7 @@ function BatchCard({ batch, isViewer, user, onRollbackDone }) {
                       <td style={{ padding: '7px 14px', textAlign: 'right' }}><DiffCell old={item.old_msrp_aed} new={item.new_msrp_aed} /></td>
                       <td style={{ padding: '7px 14px', textAlign: 'right' }}><DiffCell old={item.old_msrp_sar} new={item.new_msrp_sar} /></td>
                       <td style={{ padding: '7px 14px', textAlign: 'right' }}><DiffCell old={item.old_msrp_qat} new={item.new_msrp_qat} /></td>
+                      <td style={{ padding: '7px 14px', textAlign: 'right' }}><DiffCell old={item.old_msrp_kwd} new={item.new_msrp_kwd} /></td>
                     </tr>
                   ))}
                 </tbody>
