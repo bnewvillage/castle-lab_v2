@@ -5,7 +5,10 @@
 // come from markets.js. The caller adds its own updated_at / updated_by.
 // ─────────────────────────────────────────────────────────────
 import { toNum } from './num';
-import { DERIVED, PRICE_COLUMNS, REAL_COLUMNS, FLAG_COLUMNS, HISTORY_COLUMNS } from './markets';
+import { MARKETS, UAE, DERIVED, PRICE_COLUMNS, REAL_COLUMNS, FLAG_COLUMNS, HISTORY_COLUMNS } from './markets';
+
+// Project items live in their own table under this code prefix: PRJT-….
+export const PROJECT_BRAND = 'PRJT';
 
 const numbers = (item, columns) => Object.fromEntries(columns.map(c => [c, toNum(item[c])]));
 const flags   = (item) => Object.fromEntries(FLAG_COLUMNS.map(c => [c, !!item[c]]));
@@ -51,6 +54,17 @@ export function projectItemRow(item) {
     ...flags(item),
   };
 }
+
+// A project item in the shape of a catalogue price row (brand, barcode,
+// msrp_<market>), so it can be matched against an ERP price list. Its UAE
+// price is the ex-VAT one, as msrp_aed is.
+export const projectAsItem = (p) => ({
+  item_code:  p.item_code,
+  item_name:  p.project_item_name,
+  brand_code: PROJECT_BRAND,
+  barcode:    null,
+  ...Object.fromEntries(MARKETS.map(m => [m.price, toNum(m === UAE ? p.msrp_aed_ex_vat : p[m.price])])),
+});
 
 // Column lists for queries.
 export const PRICES_SELECT      = PRICE_COLUMNS.join(', ');

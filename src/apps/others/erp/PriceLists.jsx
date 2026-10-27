@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { t, btnG } from '../../pricing/styles';
-import { fetchAllItemsForErpAutomation } from '../../../lib/db';
+import { fetchAllItemsForErpAutomation, fetchProjectItems } from '../../../lib/db';
+import { PROJECT_BRAND, projectAsItem } from '../../../lib/rows';
 import { downloadXLSX } from '../../../lib/xlsxExport';
 import { fetchReportsIndependently } from '../../../lib/erpReports';
 import { MARKETS, PRICE_COLUMNS } from '../../../lib/markets';
@@ -20,6 +21,23 @@ function detectItemKey(rows) {
   if (!rows?.length) return null;
   return ITEM_CODE_KEYS.find(k => rows.some(r => r?.[k])) ?? null;
 }
+
+/**
+ * The prices an ERP list is matched against: the catalogue's and the project
+ * items'. brands narrows it (empty = everything); PROJECT_BRAND in it stands
+ * for the project items.
+ */
+async function fetchPrices(brands = []) {
+  const scoped    = brands.length > 0;
+  const catalogue = brands.filter(b => b !== PROJECT_BRAND);
+  const [items, projects] = await Promise.all([
+    !scoped ? fetchAllItemsForErpAutomation() : catalogue.length ? fetchAllItemsForErpAutomation(catalogue) : [],
+    !scoped || brands.includes(PROJECT_BRAND) ? fetchProjectItems() : [],
+  ]);
+  return { rows: [...items, ...projects.map(projectAsItem)], projects: projects.length };
+}
+
+const dbLog = ({ rows, projects }) => `DB: ${rows.length.toLocaleString()} rows${projects ? `, ${projects.toLocaleString()} of them project items` : ''}.`;
 
 function mergeByCode(erpRows, dbByCode, dbByBarcode, dbField) {
   return erpRows.map(row => {
@@ -43,7 +61,10 @@ function mergeByCode(erpRows, dbByCode, dbByBarcode, dbField) {
 export default function PriceLists({ creds, setCreds }) {
   const email = creds.email.trim(), password = creds.password.trim();
   const isConnected = !!(email && password);
-  const brandList = useBrandList();
+  const brands = useBrandList();
+  // Project items sit in the brand filter as one more brand.
+  const brandList = brands.some(b => b.brand_code === PROJECT_BRAND)
+    ? brands : [...brands, { brand_code: PROJECT_BRAND, brand_name: 'Project items' }];
 
   // ── Price Export ─────────────────────────────────────────────
   const [expBrands, setExpBrands] = useState([]);   // empty = all brands
@@ -52,8 +73,9 @@ export default function PriceLists({ creds, setCreds }) {
   const handlePriceExport = () => isConnected && exp.run(async (addLog) => {
     const scoped = expBrands.length > 0;
     addLog(scoped ? `Fetching DB prices for ${expBrands.length} brand(s)...` : 'Fetching DB prices...');
-    const dbRows      = await fetchAllItemsForErpAutomation(scoped ? expBrands : undefined);
-    addLog(`DB: ${dbRows.length.toLocaleString()} rows.`);
+    const db          = await fetchPrices(expBrands);
+    const dbRows      = db.rows;
+    addLog(dbLog(db));
     const dbByCode    = Object.fromEntries(dbRows.map(r => [codeKey(r.item_code), r]));
     const dbByBarcode = Object.fromEntries(dbRows.filter(r => r.barcode).map(r => [codeKey(r.barcode), r]));
 
@@ -101,10 +123,11 @@ export default function PriceLists({ creds, setCreds }) {
     addLog(`Matching on "${itemKey}".`);
 
     addLog('Fetching DB prices...');
-    const dbRows      = await fetchAllItemsForErpAutomation();
+    const db          = await fetchPrices();
+    const dbRows      = db.rows;
     const dbByCode    = Object.fromEntries(dbRows.map(r => [r.item_code?.toUpperCase(), r]));
     const dbByBarcode = Object.fromEntries(dbRows.filter(r => r.barcode).map(r => [String(r.barcode).toUpperCase(), r]));
-    addLog(`DB: ${dbRows.length.toLocaleString()} rows.`);
+    addLog(dbLog(db));
 
     const filled = rows.map(r => {
       const key    = String(r[itemKey] ?? '').toUpperCase();
@@ -135,7 +158,7 @@ export default function PriceLists({ creds, setCreds }) {
       <ErpConnection creds={creds} setCreds={setCreds} />
 
       <Section title="Price Export" tight={exp.log.length > 0}
-        description={`Fetch the ERP price list reports (${CURRENCIES.join(', ')}) and generate upload-ready files with updated rates. A list the ERP doesn't have yet is skipped; the others still export.`}
+        description={`Fetch the ERP price list reports (${CURRENCIES.join(', ')}) and generate upload-ready files with updated rates, project items included. A list the ERP doesn't have yet is skipped; the others still export.`}
         controls={
           <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0, marginLeft:16 }}>
             <BrandMultiSelect brands={brandList} selected={expBrands} onChange={setExpBrands} />
@@ -184,7 +207,7 @@ export default function PriceLists({ creds, setCreds }) {
       </Section>
 
       <Section title="Stock Without Price" tight={stk.log.length > 0}
-        description={`Pull the ERP's in-stock-without-price report and fill in ${CURRENCIES.slice(0, -1).join(', ')} and ${CURRENCIES[CURRENCIES.length - 1]} from the pricing master.`}
+        description={`Pull the ERP's in-stock-without-price report and fill in ${CURRENCIES.slice(0, -1).join(', ')} and ${CURRENCIES[CURRENCIES.length - 1]} from the pricing master and project items.`}
         controls={<RunBtn label="Fetch & Fill" loading={stk.loading} disabled={!isConnected} onClick={handleStockNoPrice} />}>
         <LogBox lines={stk.log} />
         <ErrBox msg={stk.err} />

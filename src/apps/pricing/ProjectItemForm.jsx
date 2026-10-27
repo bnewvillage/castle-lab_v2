@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { saveProjectItem } from '../../lib/db';
 import { calcProjectPrice, formatMargin, MARGIN_COLORS, DEFAULT_PROJECT_MARGIN_PCT } from '../../lib/pricing';
 import { MARKETS, DERIVED, FLAG_COLUMNS, deriveMarket } from '../../lib/markets';
+import { PROJECT_BRAND } from '../../lib/rows';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead } from './styles';
 import { toNum, hasNum, round, money } from '../../lib/num';
 import { useAuth } from '../../lib/AuthContext';
@@ -49,7 +50,7 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
   const { isViewer } = useAuth();
 
   const toForm = (item) => item ? {
-    sku_suffix:        item.item_code?.replace(/^PRJT-/i, '') || '',
+    sku_suffix:        item.item_code?.replace(new RegExp(`^${PROJECT_BRAND}-`, 'i'), '') || '',
     project_item_name: item.project_item_name || '',
     cost:              item.cost ?? '',
     cost_currency:     item.cost_currency || 'EUR',
@@ -80,7 +81,7 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
     return next;
   });
 
-  const itemCode = form.sku_suffix ? `PRJT-${form.sku_suffix.toUpperCase()}` : '';
+  const itemCode = form.sku_suffix ? `${PROJECT_BRAND}-${form.sku_suffix.toUpperCase()}` : '';
 
   // ── Auto-compute AED from cost inputs (only when not overriding UAE) ──
   useEffect(() => {
@@ -262,7 +263,7 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
                   border:`1px solid ${t.b1}`, borderRadius:8,
                   fontSize:13, color:t.t4,
                   fontFamily:'var(--font-mono)', whiteSpace:'nowrap',
-                }}>PRJT</div>
+                }}>{PROJECT_BRAND}</div>
                 <span style={{ color:t.t4, fontSize:16 }}>–</span>
                 <input
                   style={{ ...inp(!!form.sku_suffix, fieldErrs.sku_suffix), fontFamily:'var(--font-mono)', flex:1, opacity: existing ? 0.7 : 1 }}

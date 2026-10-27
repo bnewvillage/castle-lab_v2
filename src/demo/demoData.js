@@ -185,12 +185,12 @@ function seed() {
   // ── Project items (cost-driven quotation pricing) ──
   const projRng = makeRng(0x51ed);
   const PROJ = [
-    ['PRJ-ATLAS-01', 'Atlas Fleet Comms Kit',      'USD', 145],
-    ['PRJ-ATLAS-02', 'Atlas Rider Safety Bundle',  'EUR', 260],
-    ['PRJ-NOVA-01',  'Nova Track Day Package',      'EUR', 410],
-    ['PRJ-NOVA-02',  'Nova Pit Crew Apparel Set',   'GBP', 88],
-    ['PRJ-ORBIT-01', 'Orbit Adventure Luggage Set', 'EUR', 320],
-    ['PRJ-ORBIT-02', 'Orbit Winter Layering Kit',   'USD', 175],
+    ['PRJT-ATLAS-01', 'Atlas Fleet Comms Kit',      'USD', 145],
+    ['PRJT-ATLAS-02', 'Atlas Rider Safety Bundle',  'EUR', 260],
+    ['PRJT-NOVA-01',  'Nova Track Day Package',      'EUR', 410],
+    ['PRJT-NOVA-02',  'Nova Pit Crew Apparel Set',   'GBP', 88],
+    ['PRJT-ORBIT-01', 'Orbit Adventure Luggage Set', 'EUR', 320],
+    ['PRJT-ORBIT-02', 'Orbit Winter Layering Kit',   'USD', 175],
   ];
   const projectItems = PROJ.map(([item_code, project_item_name, cost_currency, cost]) => {
     const shipping_rate = pick(projRng, [0, 5, 7.5]);

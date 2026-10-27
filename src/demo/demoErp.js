@@ -7,6 +7,7 @@
 // ─────────────────────────────────────────────────────────────
 import { store } from './demoData';
 import { MARKETS, UAE } from '../lib/markets';
+import { projectAsItem } from '../lib/rows';
 
 // A few codes that exist in ERP but not in the demo catalogue,
 // so the "no price / no match" stats are non-zero and realistic.
@@ -23,7 +24,8 @@ export function demoErpReport(reportName) {
   const { currency, price: field } = m;
   const price_list = `${m.short} Retail`;
 
-  const rows = store.pricingMaster.map(it => ({
+  // The ERP's lists carry the project items too.
+  const rows = [...store.pricingMaster, ...store.projectItems.map(projectAsItem)].map(it => ({
     name: `${it.item_code}-${price_list.replace(/\s/g, '')}`,
     item_code: it.item_code,
     price_list,
