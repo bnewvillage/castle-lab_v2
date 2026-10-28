@@ -381,9 +381,9 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
             </div>
           ) : (
             <div>
-              {/* Price hero — one column per market */}
-              <div style={{ display:'grid', gridTemplateColumns:`2fr ${DERIVED.map(() => '1.4fr').join(' ')}`, gap:1, background:t.b1, borderRadius:8, overflow:'hidden', marginBottom:12 }}>
-                <div style={{ background:t.bg2, padding:'14px' }}>
+              {/* Price hero — UAE across the top, the other markets beneath it */}
+              <div style={{ display:'grid', gridTemplateColumns:`repeat(${DERIVED.length},1fr)`, gap:1, background:t.b1, borderRadius:8, overflow:'hidden', marginBottom:12 }}>
+                <div style={{ background:t.bg2, padding:'14px', gridColumn:'1 / -1' }}>
                   <div style={{ fontSize:10, color:t.t4, textTransform:'uppercase', letterSpacing:'0.06em', fontFamily:'var(--font-mono)', marginBottom:5 }}>UAE (inc VAT)</div>
                   <div style={{ fontSize:20, fontWeight:500, color:t.t1, marginBottom:3 }}>
                     {hasVal(form.msrp_aed_inc_vat) ? `AED ${Number(incVatVal).toLocaleString()}` : '—'}
@@ -395,7 +395,7 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
                     <div style={{ fontSize:10, color:t.t4, textTransform:'uppercase', letterSpacing:'0.06em', fontFamily:'var(--font-mono)', marginBottom:5 }}>
                       {m.short}{form[m.flag] && <span style={{ color:t.amber, marginLeft:4 }}>↑</span>}
                     </div>
-                    <div style={{ fontSize:15, fontWeight:500, color: hasVal(form[m.price]) ? t.t1 : t.t4, marginBottom:3 }}>
+                    <div style={{ fontSize:15, fontWeight:500, color: hasVal(form[m.price]) ? t.t1 : t.t4, marginBottom:3, whiteSpace:'nowrap' }}>
                       {hasVal(form[m.price]) ? money(form[m.price], m.currency, m.dp) : '—'}
                     </div>
                   </div>

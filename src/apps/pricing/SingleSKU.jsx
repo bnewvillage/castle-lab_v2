@@ -484,13 +484,14 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
           <div style={{color:t.t4,fontSize:13,textAlign:'center',padding:'24px 0'}}>Fill in price data to see calculations</div>
         ):(
           <div style={{display:'flex',flexDirection:'column',gap:0}}>
-            <div style={{display:'grid',gridTemplateColumns:`repeat(${MARKETS.length},1fr)`,gap:1,background:t.b1,borderRadius:8,overflow:'hidden',marginBottom:12}}>
+            {/* Two across: four prices in half the page don't fit on one row. */}
+            <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:1,background:t.b1,borderRadius:8,overflow:'hidden',marginBottom:12}}>
               {marketCards(item, margins).map(({country,price,margin})=>{
                 const m=formatMargin(margin);
                 return(
                   <div key={country} style={{background:t.bg2,padding:'14px 16px'}}>
                     <div style={{fontSize:11,color:t.t4,textTransform:'uppercase',letterSpacing:'0.06em',fontFamily:'var(--font-mono)',marginBottom:5}}>{country}</div>
-                    <div style={{fontSize:16,fontWeight:500,color:t.t1,marginBottom:3}}>{price}</div>
+                    <div style={{fontSize:16,fontWeight:500,color:t.t1,marginBottom:3,whiteSpace:'nowrap'}}>{price}</div>
                     <div style={{fontSize:12,color:MARGIN_COLORS[m.status]}}>↑ {m.label}</div>
                   </div>
                 );
@@ -609,22 +610,20 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
               </div>
               <span style={sub}>{`Ex-VAT · ${form.price_used==='cost_based'?'derived from cost at target margin':'brand markup applied'} · override to set manually · ${DERIVED.map(m=>m.short).join('/')} recalc on change`}</span>
             </div>
-            <div style={{display:'grid',gridTemplateColumns:DERIVED.map(()=>'1fr').join(' '),gap:12}}>
-              {DERIVED.map(m=>(
-                <div key={m.key} style={fg}>
-                  <label style={lbl}>{m.short} ({m.currency}) <span style={{color:form[m.flag]?t.amber:t.t4}}>{form[m.flag]?'overridden':'auto-suggested'}</span></label>
-                  <div style={{display:'flex',gap:8}}>
-                    <input {...I(m.price)} type="text" inputMode="decimal" readOnly={!form[m.flag]}
-                      style={{...inp(hasVal(form[m.price]),false),flex:1,color:form[m.flag]?t.t1:t.t3,borderColor:form[m.flag]?'rgba(245,166,35,0.4)':t.b2}}
-                    />
-                    <button style={{...btnG,...btnSm,color:form[m.flag]?t.amber:t.t4}} onClick={()=>set(m.flag,!form[m.flag])}>
-                      {form[m.flag]?'Revert':'Override'}
-                    </button>
-                  </div>
-                  <span style={sub}>{m.rule}</span>
+            {DERIVED.map(m=>(
+              <div key={m.key} style={fg}>
+                <label style={lbl}>{m.short} ({m.currency}) <span style={{color:form[m.flag]?t.amber:t.t4}}>{form[m.flag]?'overridden':'auto-suggested'}</span></label>
+                <div style={{display:'flex',gap:8}}>
+                  <input {...I(m.price)} type="text" inputMode="decimal" readOnly={!form[m.flag]}
+                    style={{...inp(hasVal(form[m.price]),false),flex:1,color:form[m.flag]?t.t1:t.t3,borderColor:form[m.flag]?'rgba(245,166,35,0.4)':t.b2}}
+                  />
+                  <button style={{...btnG,...btnSm,color:form[m.flag]?t.amber:t.t4}} onClick={()=>set(m.flag,!form[m.flag])}>
+                    {form[m.flag]?'Revert':'Override'}
+                  </button>
                 </div>
-              ))}
-            </div>
+                <span style={sub}>{m.rule}</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>
