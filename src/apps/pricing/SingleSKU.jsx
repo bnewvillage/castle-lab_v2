@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchBrandRule, fetchBrandDefaults, searchItems, fetchItem, fetchHistory, saveItem } from '../../lib/db';
 import { toNum, hasNum, round, money } from '../../lib/num';
-import { calcAllMargins, calcEmployeePrice, formatMargin, MARGIN_COLORS, calcMSRPs, calcCostBasedMSRPs, DEFAULT_COST_MARGIN_PCT, resolvePriceUsed } from '../../lib/pricing';
+import { calcAllMargins, calcEmployeePrice, formatMargin, MARGIN_COLORS, calcMSRPs, calcCostPricedMSRPs, isCostPriced, DEFAULT_COST_MARGIN_PCT, resolvePriceUsed } from '../../lib/pricing';
 import { MARKETS, DERIVED, PRICE_COLUMNS, REAL_COLUMNS, FLAG_COLUMNS, deriveMarkets } from '../../lib/markets';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead, segDiv, CURRENCIES, SOURCES, PRICE_USED_OPTIONS } from './styles';
 import BrandSelect from './BrandSelect';
@@ -17,13 +17,7 @@ import { downloadXLSX } from '../../lib/xlsxExport';
  */
 function derivePrices(form, { markup, additionalMarkup, rates }) {
   if (!form.price_used) return null;
-  if (form.price_used === 'cost_based') {
-    return calcCostBasedMSRPs(
-      toNum(form.exw_cost), form.cost_currency,
-      toNum(form.target_margin_pct) ?? DEFAULT_COST_MARGIN_PCT,
-      rates, additionalMarkup ?? null,
-    );
-  }
+  if (isCostPriced(form.price_used)) return calcCostPricedMSRPs(form, rates, additionalMarkup ?? null);
   if (markup == null) return null;
   const { value, currency } = resolvePriceUsed(form);
   if (value == null || !currency) return null;
@@ -304,8 +298,8 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
     });
   }, [form.price_used,form.msrp_primary_ex_vat,form.msrp_primary_inc_vat,form.msrp_primary_currency,
       form.msrp_secondary_ex_vat,form.msrp_secondary_inc_vat,form.msrp_secondary_currency,
-      form.exw_cost,form.cost_currency,form.target_margin_pct,form.uae_overridden,
-      markup,additionalMarkup,viewMode]);
+      form.exw_cost,form.cost_currency,form.target_margin_pct,form.shipping_rate,form.customs_duty_rate,
+      form.uae_overridden,markup,additionalMarkup,viewMode]);
 
   const hasVal = hasNum;
   const availablePriceUsed = PRICE_USED_OPTIONS.filter(o => hasVal(form[o.needs]));
@@ -324,7 +318,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
     msrp_secondary_ex_vat:  hasVal(form.msrp_secondary_ex_vat)?toNum(form.msrp_secondary_ex_vat):null,
     msrp_secondary_inc_vat: hasVal(form.msrp_secondary_inc_vat)?toNum(form.msrp_secondary_inc_vat):null,
     ...Object.fromEntries([...PRICE_COLUMNS, ...REAL_COLUMNS].map(c => [c, toNum(form[c])])),
-    target_margin_pct:      form.price_used==='cost_based' ? (hasVal(form.target_margin_pct)?toNum(form.target_margin_pct):DEFAULT_COST_MARGIN_PCT) : null,
+    target_margin_pct:      isCostPriced(form.price_used) ? (hasVal(form.target_margin_pct)?toNum(form.target_margin_pct):DEFAULT_COST_MARGIN_PCT) : null,
   });
 
   const item    = asItem();
@@ -332,7 +326,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
   const emp     = calcEmployeePrice(item, rates);
 
   const handleEstimate = () => {
-    if (form.price_used === 'cost_based') {
+    if (isCostPriced(form.price_used)) {
       setEstimateError('Not needed — price is already derived from cost via target margin');
       return;
     }
@@ -360,7 +354,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
     if (!form.brand_code)         { fe.brand_code=true; ge.identity=true; }
     if (!form.sku_suffix?.trim()) { fe.sku_suffix=true; ge.identity=true; }
     if (!form.item_name?.trim())  { fe.item_name=true;  ge.identity=true; }
-    const costBased = form.price_used === 'cost_based';
+    const costBased = isCostPriced(form.price_used);
     const hasPri = hasVal(form.msrp_primary_ex_vat) || hasVal(form.msrp_primary_inc_vat);
     const hasSec = hasVal(form.msrp_secondary_ex_vat) || hasVal(form.msrp_secondary_inc_vat);
     if (!hasPri && !costBased)    { fe.msrp_primary=true; ge.priceData=true; }
@@ -587,11 +581,13 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
                 <span style={sub}>Where selling price was obtained</span>
               </div>
             </div>
-            {form.price_used==='cost_based' && (
+            {isCostPriced(form.price_used) && (
               <div style={fg}>
                 <label style={lbl}>Target margin (%) <span style={{color:t.t4,fontWeight:400,textTransform:'none',letterSpacing:0}}>default {DEFAULT_COST_MARGIN_PCT}</span></label>
                 <input {...I('target_margin_pct',fieldErrs.target_margin_pct)} type="text" inputMode="decimal" placeholder={String(DEFAULT_COST_MARGIN_PCT)}/>
-                <span style={sub}>Price = EXW cost in AED ÷ (1 − margin) · shipping & customs excluded</span>
+                <span style={sub}>{form.price_used==='landed_cost_based'
+                  ? 'Price = landed cost in AED (EXW + shipping, + customs) ÷ (1 − margin) · reprices when shipping or customs change'
+                  : 'Price = EXW cost in AED ÷ (1 − margin) · shipping & customs excluded'}</span>
               </div>
             )}
             <div style={fg}>
@@ -608,7 +604,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
                   {form.uae_overridden?'Revert':'Override'}
                 </button>
               </div>
-              <span style={sub}>{`Ex-VAT · ${form.price_used==='cost_based'?'derived from cost at target margin':'brand markup applied'} · override to set manually · ${DERIVED.map(m=>m.short).join('/')} recalc on change`}</span>
+              <span style={sub}>{`Ex-VAT · ${form.price_used==='landed_cost_based'?'derived from landed cost at target margin':form.price_used==='cost_based'?'derived from cost at target margin':'brand markup applied'} · override to set manually · ${DERIVED.map(m=>m.short).join('/')} recalc on change`}</span>
             </div>
             {DERIVED.map(m=>(
               <div key={m.key} style={fg}>

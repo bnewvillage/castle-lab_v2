@@ -34,8 +34,8 @@ export function calcLandedCost({ exw_cost, shipping_rate, customs_duty_rate, cos
  *
  * The single implementation for every caller — form state, an Excel row and a
  * database record all use the same field names, and toNum accepts strings and
- * numbers alike, so no caller needs its own copy of this map. `cost_based`
- * rows price from cost rather than a vendor MSRP and resolve to nulls.
+ * numbers alike, so no caller needs its own copy of this map. Cost-priced rows
+ * (isCostPriced) price from cost rather than a vendor MSRP and resolve to nulls.
  */
 export function resolvePriceUsed(item) {
   const map = {
@@ -99,6 +99,14 @@ export function calcAllMargins(item, rates) {
 
 export const DEFAULT_COST_MARGIN_PCT = 25;
 
+// The two ways a catalogue item is priced from its cost rather than a vendor
+// MSRP, both at target_margin_pct:
+//   cost_based         on the EXW cost alone
+//   landed_cost_based  on the fully landed cost (shipping and customs in), as
+//                      Project Items are priced
+const COST_PRICED = new Set(['cost_based', 'landed_cost_based']);
+export const isCostPriced = (priceUsed) => COST_PRICED.has(priceUsed);
+
 // The unrounded UAE shelf target (VAT-inclusive) for a vendor price after the
 // brand markup. Every UAE price is rounded from a target like this, exactly once.
 export function baseShelfFromPrice(priceUsedValue, priceCurrency, markupPercentage, rates) {
@@ -118,11 +126,34 @@ export function baseShelfFromCost(exwCost, costCurrency, targetMarginPct, rates)
   return costAED / (1 - margin) * 1.05;
 }
 
+// The unrounded UAE shelf target for the fully landed cost at a target gross
+// margin: the basis calcProjectPrice prices project items on.
+export function baseShelfFromLanded(costInputs, targetMarginPct, rates) {
+  const landed = calcLandedCost(costInputs, rates);
+  if (landed == null) return null;
+  const margin = (targetMarginPct ?? DEFAULT_COST_MARGIN_PCT) / 100;
+  if (!(margin > 0 && margin < 1)) return null;
+  return landed / (1 - margin) * 1.05;
+}
+
+// The unrounded target of a cost-priced row (form state, a sheet row or a
+// database record), by its price_used.
+export function costBaseShelf(item, rates) {
+  const margin = toNum(item.target_margin_pct);
+  if (item.price_used === 'landed_cost_based') {
+    return baseShelfFromLanded({
+      exw_cost:          toNum(item.exw_cost),
+      cost_currency:     item.cost_currency,
+      shipping_rate:     toNum(item.shipping_rate) ?? 0,
+      customs_duty_rate: toNum(item.customs_duty_rate) ?? 5.5,
+    }, margin, rates);
+  }
+  return baseShelfFromCost(toNum(item.exw_cost), item.cost_currency, margin, rates);
+}
+
 // The unrounded base target a pricing_master row's source implies.
 export function itemBaseShelf(item, { markup, rates }) {
-  if (item.price_used === 'cost_based') {
-    return baseShelfFromCost(toNum(item.exw_cost), item.cost_currency, toNum(item.target_margin_pct), rates);
-  }
+  if (isCostPriced(item.price_used)) return costBaseShelf(item, rates);
   const { value, currency } = resolvePriceUsed(item);
   return baseShelfFromPrice(value, currency, markup ?? 10, rates);
 }
@@ -163,6 +194,12 @@ export function calcMSRPs(priceValue, priceCurrency, baseMarkupPct, additionalMa
 // Every price from EXW cost by enforcing a target gross margin.
 export function calcCostBasedMSRPs(exwCost, costCurrency, targetMarginPct, rates, additionalMarkupPct = null) {
   return msrpsFromBaseShelf(baseShelfFromCost(exwCost, costCurrency, targetMarginPct, rates), additionalMarkupPct);
+}
+
+// Every price of a cost-priced row, EXW or landed by its price_used. The
+// brand's additional markup goes on top, as for any other basis.
+export function calcCostPricedMSRPs(item, rates, additionalMarkupPct = null) {
+  return msrpsFromBaseShelf(costBaseShelf(item, rates), additionalMarkupPct);
 }
 
 // An additional markup on a stored, already-rounded base. Only for when the
@@ -280,7 +317,7 @@ export function validateItem(item) {
   if (!item.item_name?.trim())       errors.push('Item name is required');
   if (!item.brand_code)              errors.push('Brand is required');
   if (!item.cost_currency)           errors.push('Cost currency is required');
-  if (item.price_used !== 'cost_based' && !item.msrp_primary_currency) errors.push('Primary MSRP currency is required');
+  if (!isCostPriced(item.price_used) && !item.msrp_primary_currency) errors.push('Primary MSRP currency is required');
   if (!item.price_used)              errors.push('Price used must be selected');
   if (!item.price_source)            errors.push('Price source is required');
   if (!item.cost_source)             errors.push('Cost source is required');

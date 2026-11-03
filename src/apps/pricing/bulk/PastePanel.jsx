@@ -1,6 +1,7 @@
 import { t, inp, sel, btnW, btnG, lbl, groupBox, groupHead, CURRENCIES } from '../styles';
 import BrandSelect from '../BrandSelect';
 import { SOURCES, PASTE_PRICE_USED } from '../../../lib/bulkImport';
+import { isCostPriced } from '../../../lib/pricing';
 
 const PASTE_COLS = [
   { k:'sku',                  label:'SKU *',          ph:'ABC123' },
@@ -21,7 +22,7 @@ const pasteBox = {
 
 export default function PastePanel({ paste, setPasteField, opts, setOpt, brands, processing, isViewer, onProcess }) {
   const skuCount = paste.sku.split('\n').filter(s => s.trim()).length;
-  const isCostBased = opts.price_used === 'cost_based';
+  const isCostBased = isCostPriced(opts.price_used);
   const ready = skuCount > 0 && opts.brand_code && !processing && !isViewer;
 
   const Field = ({ label, hint, children }) => (

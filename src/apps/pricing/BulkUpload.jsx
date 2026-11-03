@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import * as XLSX from 'xlsx-js-style';
 import { toNum, money } from '../../lib/num';
 import { fetchBrands, fetchRates, bulkSaveItems, checkExisting, fetchItemsByCodes } from '../../lib/db';
-import { resolvePriceUsed } from '../../lib/pricing';
+import { resolvePriceUsed, isCostPriced } from '../../lib/pricing';
 import { DERIVED, PRICE_COLUMNS } from '../../lib/markets';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, groupBox, groupHead, CURRENCIES } from './styles';
 import { useAuth } from '../../lib/AuthContext';
@@ -709,7 +709,7 @@ export default function BulkUpload({ onToast }) {
                       <td style={{ padding:'8px 14px' }}><InlineEdit field="cost_currency"/></td>
                       <td style={{ padding:'8px 14px' }}><InlineEdit field="msrp_primary_currency"/></td>
                       <td style={{ padding:'8px 14px' }}><InlineEdit field="price_used"/></td>
-                      <td style={{ padding:'8px 14px' }}>{row.price_used==='cost_based'?<InlineEdit field="target_margin_pct"/>:<span style={{ fontSize:13, color:t.t4 }}>—</span>}</td>
+                      <td style={{ padding:'8px 14px' }}>{isCostPriced(row.price_used)?<InlineEdit field="target_margin_pct"/>:<span style={{ fontSize:13, color:t.t4 }}>—</span>}</td>
                       <td style={{ padding:'8px 14px', fontSize:13, color:t.t2, whiteSpace:'nowrap' }}>{priceVal?`${priceCurr} ${fmtNum(priceVal)}`:'—'}</td>
                       <td style={{ padding:'8px 14px', fontSize:13, color:t.green, fontWeight:500, whiteSpace:'nowrap', textAlign:'right' }}>{row.msrp_aed?`AED ${fmtNum(row.msrp_aed)}`:'—'}</td>
                       {DERIVED.map(m=>(

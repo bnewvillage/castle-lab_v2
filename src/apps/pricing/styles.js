@@ -6,6 +6,7 @@ export const PRICE_USED_OPTIONS = [
   { value:'secondary_ex_vat',  label:'Secondary w/o VAT', needs:'msrp_secondary_ex_vat' },
   { value:'secondary_inc_vat', label:'Secondary w/ VAT',  needs:'msrp_secondary_inc_vat' },
   { value:'cost_based',        label:'Cost + margin',     needs:'exw_cost' },
+  { value:'landed_cost_based', label:'Landed cost + margin', needs:'exw_cost' },
 ];
 
 // Design tokens — blue-tinted charcoal, mirrors :root vars in styles/global.css

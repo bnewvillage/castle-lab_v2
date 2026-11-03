@@ -2,13 +2,13 @@ import { useState, useEffect } from 'react';
 import { toNum } from '../../lib/num';
 import * as XLSX from 'xlsx-js-style';
 import { fetchBrands, fetchRates, fetchItemsByCodes, bulkUpdateItemFields } from '../../lib/db';
-import { calcMSRPs, calcCostBasedMSRPs, DEFAULT_COST_MARGIN_PCT, resolvePriceUsed } from '../../lib/pricing';
+import { calcMSRPs, calcCostPricedMSRPs, isCostPriced, resolvePriceUsed } from '../../lib/pricing';
 import { MARKETS } from '../../lib/markets';
 import { t, inp, sel, btnW, btnG, lbl, groupBox, groupHead, CURRENCIES } from './styles';
 import BrandSelect from './BrandSelect';
 
 const SOURCES         = ['Portal','File','Website','Invoice','Estimate'];
-const PRICE_USED_OPTS = ['primary_ex_vat','primary_inc_vat','cost_based'];
+const PRICE_USED_OPTS = ['primary_ex_vat','primary_inc_vat','cost_based','landed_cost_based'];
 const NO_CHANGE       = '';   // sentinel for "leave this column alone"
 
 // Columns pasted per row. A blank line leaves that field untouched for that item.
@@ -42,6 +42,8 @@ const PRICE_INPUTS = new Set([
   'exw_cost','msrp_primary_ex_vat','msrp_primary_inc_vat',
   'cost_currency','msrp_primary_currency','price_used','target_margin_pct',
 ]);
+// A landed-cost price is set by shipping and customs too.
+const LANDED_INPUTS = new Set(['shipping_rate','customs_duty_rate']);
 const ALL_FIELDS = [...ROW_FIELDS, ...OPT_FIELDS];
 const LABELS = Object.fromEntries([...ALL_FIELDS, ...PRICE_COLS].map(f => [f.k, f.label]));
 const isNumField = (k) => !!ALL_FIELDS.find(f => f.k === k)?.num;
@@ -69,12 +71,7 @@ function sameValue(a, b, isNum) {
 
 function recalcPrices(merged, markup, additional, rates) {
   try {
-    if (merged.price_used === 'cost_based') {
-      return calcCostBasedMSRPs(
-        toNum(merged.exw_cost), merged.cost_currency,
-        toNum(merged.target_margin_pct) ?? DEFAULT_COST_MARGIN_PCT, rates, additional,
-      );
-    }
+    if (isCostPriced(merged.price_used)) return calcCostPricedMSRPs(merged, rates, additional);
     const { value, currency } = resolvePriceUsed(merged);
     if (value == null || !currency) return null;
     return calcMSRPs(value, currency, markup ?? 10, additional, rates);
@@ -183,7 +180,8 @@ export default function BulkUpdatePaste({ onToast, isViewer }) {
         const merged = { ...row };
         for (const [k, v] of Object.entries(incoming)) merged[k] = isNumField(k) ? toNum(v) : v;
         const rule   = rules[row.brand_code] || {};
-        const touchesPrice = diffs.some(d => PRICE_INPUTS.has(d.field));
+        const touchesPrice = diffs.some(d => PRICE_INPUTS.has(d.field)
+          || (LANDED_INPUTS.has(d.field) && merged.price_used === 'landed_cost_based'));
         const prices = touchesPrice ? recalcPrices(merged, rule.markup, rule.additional, rates) : null;
         if (prices) {
           for (const pc of PRICE_COLS) {

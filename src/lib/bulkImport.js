@@ -7,11 +7,11 @@
 import * as XLSX from 'xlsx-js-style';
 import { fetchBrands, fetchRates } from './db';
 import { toNum } from './num';
-import { calcMSRPs, calcCostBasedMSRPs, DEFAULT_COST_MARGIN_PCT, resolvePriceUsed } from './pricing';
+import { calcMSRPs, calcCostPricedMSRPs, isCostPriced, resolvePriceUsed } from './pricing';
 import { PRICE_COLUMNS, REAL_COLUMNS } from './markets';
 import { CURRENCIES } from '../apps/pricing/styles';
 
-export const PRICE_USED_OPTIONS = ['primary_ex_vat','primary_inc_vat','secondary_ex_vat','secondary_inc_vat','cost_based'];
+export const PRICE_USED_OPTIONS = ['primary_ex_vat','primary_inc_vat','secondary_ex_vat','secondary_inc_vat','cost_based','landed_cost_based'];
 export const SOURCES            = ['Portal','File','Website','Invoice','Estimate'];
 export const LARGE_THRESHOLD    = 5000;  // above this, paginate review and show progress
 export const REVIEW_PAGE_SIZE   = 100;   // rows per page in review / dup tables
@@ -20,8 +20,8 @@ export const MERGE_FIELDS = ['item_name','barcode','cost_currency','exw_cost','s
   'customs_duty_rate','msrp_primary_currency','msrp_primary_ex_vat','msrp_primary_inc_vat',
   'msrp_secondary_currency','msrp_secondary_ex_vat','msrp_secondary_inc_vat',
   'price_used','target_margin_pct','cost_source','price_source'];
-// Paste import writes primaries only, so cost_based has no secondary fallback here.
-export const PASTE_PRICE_USED   = ['primary_ex_vat','primary_inc_vat','cost_based'];
+// Paste import writes primaries only, so the cost bases have no secondary fallback here.
+export const PASTE_PRICE_USED   = ['primary_ex_vat','primary_inc_vat','cost_based','landed_cost_based'];
 
 // ── TEMPLATE GENERATOR ────────────────────────────────────────
 export async function generateTemplate() {
@@ -49,8 +49,8 @@ export async function generateTemplate() {
     msrp_secondary_currency:'Currency of secondary MSRP (optional)',
     msrp_secondary_ex_vat:'Secondary MSRP ex VAT (optional)',
     msrp_secondary_inc_vat:'Secondary MSRP inc VAT (optional)',
-    price_used:'Which MSRP drives pricing, or cost_based to derive the price from EXW cost — see Reference sheet',
-    target_margin_pct:'Target gross margin % when price_used is cost_based (default: 25) — shipping/customs not included',
+    price_used:'Which MSRP drives pricing, or cost_based / landed_cost_based to derive the price from cost — see Reference sheet',
+    target_margin_pct:'Target gross margin % when price_used is cost_based (on EXW cost) or landed_cost_based (on landed cost: shipping and customs in) — default: 25',
     cost_source:'Where cost data came from — see Reference sheet',
     price_source:'Where price data came from — see Reference sheet',
     barcode:'Product barcode (optional) — stored as text',
@@ -106,7 +106,7 @@ export function validateAndCalc(row, brandMap, markupCache, additionalMarkupCach
   if (!row.cost_currency)       errors.push('cost_currency is required');
   // Cost is optional — vendors don't always send one — but must parse when present.
   if (String(row.exw_cost ?? '').trim() !== '' && toNum(row.exw_cost) == null) errors.push('exw_cost must be a number');
-  const isCostBased = row.price_used === 'cost_based';
+  const isCostBased = isCostPriced(row.price_used);
   if (!row.msrp_primary_currency && !isCostBased) errors.push('msrp_primary_currency is required');
   if (!row.price_used || !PRICE_USED_OPTIONS.includes(row.price_used)) {
     errors.push(`price_used must be one of: ${PRICE_USED_OPTIONS.join(', ')}`);
@@ -127,9 +127,9 @@ export function validateAndCalc(row, brandMap, markupCache, additionalMarkupCach
     errors.push('target_margin_pct must be a number between 0 and 100');
   }
 
-  // Every market's prices via calcMSRPs / calcCostBasedMSRPs
+  // Every market's prices via calcMSRPs / calcCostPricedMSRPs
   const msrps = errors.length > 0 ? null : isCostBased
-    ? calcCostBasedMSRPs(toNum(row.exw_cost), row.cost_currency, targetMargin ?? DEFAULT_COST_MARGIN_PCT, rates, additionalMarkupCache[brandCode] ?? null)
+    ? calcCostPricedMSRPs(row, rates, additionalMarkupCache[brandCode] ?? null)
     : calcMSRPs(priceVal, priceCurrency, markupCache[brandCode] ?? 10, additionalMarkupCache[brandCode] ?? null, rates);
 
   return {

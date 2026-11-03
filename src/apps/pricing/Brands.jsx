@@ -7,6 +7,7 @@ import { useAuth } from '../../lib/AuthContext';
 
 const PRICE_USED_LABELS = {
   cost_based:       'Cost based',
+  landed_cost_based: 'Landed cost',
   primary_ex_vat:   'Pri ex VAT',
   primary_inc_vat:  'Pri inc VAT',
   secondary_ex_vat: 'Sec ex VAT',
