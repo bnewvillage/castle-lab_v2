@@ -68,22 +68,25 @@ function MarginTable({ stats: exw }) {
   );
 }
 
+// The SKUs a margin leaves out, by reason: "2 priced from cost, so no vendor MSRP".
+const gapLine = (gaps) => gaps.map(g => `${g.count.toLocaleString()} ${g.reason}`).join(' · ');
+
 // One margin across the brand: its figures, or why there are none, and how
-// many SKUs it leaves out.
-function MarginSection({ title, basis, stats, none, why }) {
+// many SKUs it leaves out and why.
+function MarginSection({ title, basis, stats }) {
   return (
     <div>
       {/* The basis on its own line, so both margin tables start at the same height. */}
       <div style={{ ...colHead, marginBottom: 0 }}>{title}</div>
       <div style={{ ...colHead, textTransform: 'none', letterSpacing: 0 }}>{basis}</div>
       {stats.n === 0 ? (
-        <div style={{ fontSize: 12.5, color: t.t4 }}>{none}</div>
+        <div style={{ fontSize: 12.5, color: t.t4, lineHeight: 1.5 }}>None for any SKU: {gapLine(stats.gaps)}.</div>
       ) : (
         <>
           <MarginTable stats={stats} />
           {stats.missing > 0 && (
             <div style={{ fontSize: 11.5, color: t.t4, marginTop: 8 }}>
-              From {stats.n.toLocaleString()} SKU{stats.n === 1 ? '' : 's'}; {stats.missing.toLocaleString()} {stats.missing === 1 ? 'has' : 'have'} none ({why}).
+              From {stats.n.toLocaleString()} SKU{stats.n === 1 ? '' : 's'}. Left out: {gapLine(stats.gaps)}.
             </div>
           )}
         </>
@@ -144,11 +147,9 @@ export default function BrandProfile({ brandCode, rates: givenRates }) {
             )}
           </div>
 
-          <MarginSection title="EXW margin" basis="basis price vs EXW cost" stats={p.exw}
-            none="No SKU has both a basis price and an EXW cost." why="cost-priced, or no cost data" />
+          <MarginSection title="EXW margin" basis="vendor MSRP vs EXW cost" stats={p.exw} />
 
-          <MarginSection title="Landed margin" basis="UAE price vs landed cost" stats={p.landed}
-            none="No SKU has both a UAE price and an EXW cost." why="no cost data, or no UAE price" />
+          <MarginSection title="Landed margin" basis="UAE price vs landed cost" stats={p.landed} />
         </div>
       )}
     </div>

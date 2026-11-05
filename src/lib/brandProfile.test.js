@@ -41,3 +41,16 @@ test('landed margin covers cost-priced SKUs too: UAE price vs landed cost', () =
   expect(p.landed).toMatchObject({ n: 1, missing: 1, median: 50 });   // C: 100 AED vs 50 landed; A has no UAE price
   expect(p.landed.min).toMatchObject({ value: 50, sku: 'C', count: 1 });
 });
+
+test('a margin with no SKUs says why, counted by reason', () => {
+  const landed = (code) => row(code, 0, { price_used: 'landed_cost_based', msrp_primary_ex_vat: null, exw_cost: 320, cost_currency: 'EUR', msrp_aed: 1833.33 });
+  const p = brandProfile([landed('A'), landed('B')], rates);
+  expect(p.exw).toMatchObject({ n: 0, missing: 2, gaps: [{ reason: 'priced from cost, so no vendor MSRP', count: 2 }] });
+  expect(p.landed.n).toBe(2);
+  const mixed = brandProfile([landed('A'), row('B', 30, { exw_cost: 0 }), row('C', 30, { msrp_primary_ex_vat: null })], rates);
+  expect(mixed.exw.gaps).toEqual([
+    { reason: 'priced from cost, so no vendor MSRP', count: 1 },
+    { reason: 'no EXW cost', count: 1 },
+    { reason: 'no vendor MSRP entered', count: 1 },
+  ]);
+});

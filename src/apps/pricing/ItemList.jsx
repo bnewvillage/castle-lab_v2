@@ -149,7 +149,7 @@ function InlineSummary({ item, rates }) {
                     <span style={labelStyle}>EXW margin</span>
                     <div style={{ textAlign:'right' }}>
                       <span style={{ color:MARGIN_COLORS[exwFmt.status], fontSize:12, fontWeight:500 }}>{exwFmt.label}</span>
-                      <div style={{ fontSize:10, color:t.t4, marginTop:1 }}>basis price vs cost · no markup</div>
+                      <div style={{ fontSize:10, color:t.t4, marginTop:1 }}>vendor MSRP vs cost · no markup</div>
                     </div>
                   </div>
                 );

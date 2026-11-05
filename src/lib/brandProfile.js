@@ -5,7 +5,7 @@
 // EXW and landed margins. Pure: the caller supplies the brand's rows and the rates.
 // ─────────────────────────────────────────────────────────────
 import { calcEXWMargin, calcAllMargins } from './pricing';
-import { PRICE_BASIS } from './priceBases';
+import { PRICE_BASIS, isCostPriced, basisPrice } from './priceBases';
 import { toNum, round } from './num';
 
 const pct = (n, total) => (total ? (n / total) * 100 : 0);
@@ -27,15 +27,19 @@ function breakdown(items, valueOf, labelOf = (v) => v) {
  * The spread of one margin across the brand. Margins are compared to 0.1%, the
  * precision the app shows them at: the mode, and which SKUs sit at the minimum
  * and maximum, use that rounding. An EXW cost of 0 means "no cost data", so
- * those SKUs have no margin.
+ * those SKUs have no margin. Every SKU left out is counted under gapOf's
+ * reason for it, so the card can say why.
  */
-function marginStats(items, marginOf) {
-  const rows = items
-    .filter(it => toNum(it.exw_cost) > 0)
-    .map(it => ({ sku: it.item_code, margin: marginOf({ ...it, exw_cost: toNum(it.exw_cost) }) }))
-    .filter(r => r.margin != null && Number.isFinite(r.margin))
-    .map(r => ({ ...r, at: round(r.margin, 1) }));
-  if (!rows.length) return { n: 0, missing: items.length };
+function marginStats(items, marginOf, gapOf) {
+  const rows = [], gapCounts = new Map();
+  for (const it of items) {
+    const margin = toNum(it.exw_cost) > 0 ? marginOf({ ...it, exw_cost: toNum(it.exw_cost) }) : null;
+    if (margin != null && Number.isFinite(margin)) { rows.push({ sku: it.item_code, margin, at: round(margin, 1) }); continue; }
+    const reason = gapOf(it);
+    gapCounts.set(reason, (gapCounts.get(reason) ?? 0) + 1);
+  }
+  const gaps = [...gapCounts.entries()].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count);
+  if (!rows.length) return { n: 0, missing: items.length, gaps };
 
   const sorted = rows.map(r => r.margin).sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -54,6 +58,7 @@ function marginStats(items, marginOf) {
   return {
     n: rows.length,
     missing: items.length - rows.length,
+    gaps,
     median, mean,
     // A mode only means something when a value repeats.
     mode: modeCount > 1 ? { value: modeAt, count: modeCount, pct: pct(modeCount, items.length) } : null,
@@ -62,15 +67,29 @@ function marginStats(items, marginOf) {
   };
 }
 
+// Why a SKU has no EXW margin, or no landed margin.
+const noCost = (it) => !(toNum(it.exw_cost) > 0);
+function exwGap(it) {
+  if (isCostPriced(it.price_used)) return 'priced from cost, so no vendor MSRP';
+  if (noCost(it))                  return 'no EXW cost';
+  if (basisPrice(it).value == null) return 'no vendor MSRP entered';
+  return 'no exchange rate for its currency';
+}
+function landedGap(it) {
+  if (noCost(it))                 return 'no EXW cost';
+  if (!(toNum(it.msrp_aed) > 0))  return 'no UAE price';
+  return 'no exchange rate for its currency';
+}
+
 export function brandProfile(items, rates) {
   return {
     count: items.length,
     bases:          breakdown(items, it => it.price_used, v => PRICE_BASIS[v]?.label ?? v),
     costCurrencies: breakdown(items, it => it.cost_currency),
     msrpCurrencies: breakdown(items.filter(it => PRICE_BASIS[it.price_used]?.msrp), it => it[PRICE_BASIS[it.price_used].currency]),
-    // Vendor price vs EXW cost: none for a cost-priced SKU.
-    exw:    marginStats(items, it => calcEXWMargin(it, rates)),
+    // Vendor MSRP vs EXW cost: none for a SKU priced from cost, which has no MSRP to compare.
+    exw:    marginStats(items, it => calcEXWMargin(it, rates), exwGap),
     // UAE selling price vs landed cost: every SKU with a cost and a price.
-    landed: marginStats(items, it => calcAllMargins(it, rates)?.uae_margin ?? null),
+    landed: marginStats(items, it => calcAllMargins(it, rates)?.uae_margin ?? null, landedGap),
   };
 }
