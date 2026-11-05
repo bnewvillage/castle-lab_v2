@@ -1,0 +1,35 @@
+import { brandProfile } from './brandProfile';
+
+const rates = { AED: 1, EUR: 4 };
+// An MSRP-priced row whose EXW margin is exactly `margin` %: price 100 EUR, cost (100 − margin).
+const row = (code, margin, over = {}) => ({
+  item_code: code, price_used: 'primary_ex_vat', msrp_primary_ex_vat: 100, msrp_primary_currency: 'EUR',
+  exw_cost: 100 - margin, cost_currency: 'EUR', ...over,
+});
+
+test('price bases and currencies: each distinct value with its count and share, most used first', () => {
+  const p = brandProfile([row('A', 40), row('B', 40), row('C', 30, { price_used: 'cost_based', cost_currency: 'AED' }), row('D', 30)], rates);
+  expect(p.count).toBe(4);
+  expect(p.bases).toEqual([
+    { value: 'primary_ex_vat', label: 'Primary w/o VAT', count: 3, pct: 75 },
+    { value: 'cost_based', label: 'Cost + margin', count: 1, pct: 25 },
+  ]);
+  expect(p.costCurrencies.map(c => [c.label, c.count])).toEqual([['EUR', 3], ['AED', 1]]);
+  expect(p.msrpCurrencies).toEqual([{ value: 'EUR', label: 'EUR', count: 3, pct: 100 }]);   // of the MSRP-priced three
+});
+
+test('EXW margins: median, mean, mode, and the SKUs sharing the min and max, as shares of the brand', () => {
+  const p = brandProfile([row('A', 20), row('B', 20), row('C', 35), row('D', 50), row('E', 50), row('F', 50), row('G', 0, { exw_cost: 0 })], rates);
+  expect(p.exw.n).toBe(6);
+  expect(p.exw.missing).toBe(1);                         // cost 0 is "no cost data"
+  expect(p.exw.median).toBeCloseTo(42.5, 9);             // 35 and 50
+  expect(p.exw.mean).toBeCloseTo((20 + 20 + 35 + 50 * 3) / 6, 9);
+  expect(p.exw.mode).toMatchObject({ value: 50, count: 3 });
+  expect(p.exw.min).toEqual({ value: 20, sku: 'A', count: 2, pct: (2 / 7) * 100 });
+  expect(p.exw.max).toMatchObject({ value: 50, sku: 'D', count: 3 });
+});
+
+test('no mode when no margin repeats; nothing to show for an empty brand', () => {
+  expect(brandProfile([row('A', 10), row('B', 20)], rates).exw.mode).toBeNull();
+  expect(brandProfile([], rates)).toMatchObject({ count: 0, bases: [], exw: { n: 0 } });
+});

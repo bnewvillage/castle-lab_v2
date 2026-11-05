@@ -1,5 +1,6 @@
 import { t, inp, sel, btnW, btnG, lbl, groupBox, groupHead, CURRENCIES } from '../styles';
 import BrandSelect from '../BrandSelect';
+import BrandProfile from '../BrandProfile';
 import { SOURCES } from '../../../lib/bulkImport';
 import { PRICE_BASIS, PASTE_BASIS_VALUES, isCostPriced } from '../../../lib/priceBases';
 
@@ -83,13 +84,16 @@ export default function PastePanel({ paste, setPasteField, opts, setOpt, brands,
               placeholder="5.5" style={inp(!!opts.customs_duty_rate,false)} />
           </Field>
           {isCostBased && (
-            <Field label="Target margin %" hint="default 25">
+            <Field label="Target margin %" hint={`default ${PRICE_BASIS[opts.price_used].defaultMargin}`}>
               <input value={opts.target_margin_pct} onChange={e=>setOpt('target_margin_pct', e.target.value)}
-                placeholder="25" style={inp(!!opts.target_margin_pct,false)} />
+                placeholder={String(PRICE_BASIS[opts.price_used].defaultMargin)} style={inp(!!opts.target_margin_pct,false)} />
             </Field>
           )}
         </div>
       </div>
+
+      {/* How the brand's catalogue is set up today, for reference while adding */}
+      <BrandProfile brandCode={opts.brand_code} />
 
       {/* Pasted columns */}
       <div style={{ ...groupBox(false), marginBottom:16 }}>

@@ -7,6 +7,7 @@ import { PRICE_BASES, PRICE_BASIS, isCostPriced, basisNeeds, basisPrice, targetM
 import { MARKETS, UAE, DERIVED, PRICE_COLUMNS, REAL_COLUMNS, FLAG_COLUMNS, deriveMarkets } from '../../lib/markets';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead, segDiv, CURRENCIES, SOURCES } from './styles';
 import BrandSelect from './BrandSelect';
+import BrandProfile from './BrandProfile';
 import { useAuth } from '../../lib/AuthContext';
 import { downloadXLSX } from '../../lib/xlsxExport';
 
@@ -428,6 +429,8 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
         </div>
       </div>
     )}
+    {/* How the brand's catalogue is set up today, for reference while adding */}
+    <BrandProfile brandCode={form.brand_code} rates={rates} />
     <div style={{ pointerEvents: viewMode ? 'none' : undefined }}>
     <div style={{ display:'grid', gridTemplateColumns:'1fr 1.6fr', gridTemplateRows:'auto auto', gap:20, marginBottom:20, alignItems:'start' }}>
 
