@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { t, btnG } from '../../pricing/styles';
 import {
-  fetchAllItemsForErpAutomation,
   syncErpItemsBatch, pruneStaleErpItems, fetchErpCoverage, filterCodesInErpCache,
   countErpItems, getErpCacheInfo, updateErpSyncMeta,
   saveErpSyncCursor, getErpMaxModified,
@@ -10,6 +9,7 @@ import { downloadXLSX } from '../../../lib/xlsxExport';
 import { callErpProxy } from '../../../lib/erpProxy';
 import { fetchReportsIndependently } from '../../../lib/erpReports';
 import { PRICE_COLUMNS } from '../../../lib/markets';
+import { fetchPriceRows } from '../../../lib/erpPrices';
 import ErpConnection from '../ErpConnection';
 import {
   PRICE_REPORTS, fetchReport, today, useJob, useBrandList,
@@ -127,7 +127,8 @@ export default function CatalogueChecks({ creds, setCreds }) {
     addLog(`${withPrice.size.toLocaleString()} items with retail price across all lists.`);
 
     addLog('Loading DB items...');
-    const dbRows = await fetchAllItemsForErpAutomation();
+    // The catalogue only: quotes aren't expected to exist in the ERP.
+    const { rows: dbRows } = await fetchPriceRows({ projects: false });
     addLog(`DB: ${dbRows.length.toLocaleString()} items.`);
 
     // Narrow to unpriced items FIRST, then ask the cache about only those —

@@ -1,7 +1,7 @@
 import { t, inp, sel, btnW, btnG, lbl, groupBox, groupHead, CURRENCIES } from '../styles';
 import BrandSelect from '../BrandSelect';
-import { SOURCES, PASTE_PRICE_USED } from '../../../lib/bulkImport';
-import { isCostPriced } from '../../../lib/pricing';
+import { SOURCES } from '../../../lib/bulkImport';
+import { PRICE_BASIS, PASTE_BASIS_VALUES, isCostPriced } from '../../../lib/priceBases';
 
 const PASTE_COLS = [
   { k:'sku',                  label:'SKU *',          ph:'ABC123' },
@@ -45,10 +45,10 @@ export default function PastePanel({ paste, setPasteField, opts, setOpt, brands,
             <BrandSelect brands={brands} value={opts.brand_code}
               onChange={v => setOpt('brand_code', v)} hasError={!opts.brand_code} />
           </Field>
-          <Field label="MSRP source *" hint={isCostBased ? 'derived from cost' : undefined}>
+          <Field label="Price basis *" hint={isCostBased ? 'derived from cost' : undefined}>
             <select value={opts.price_used} onChange={e=>setOpt('price_used', e.target.value)}
               style={sel(true,false)}>
-              {PASTE_PRICE_USED.map(o => <option key={o} value={o}>{o}</option>)}
+              {PASTE_BASIS_VALUES.map(o => <option key={o} value={o}>{PRICE_BASIS[o].label}</option>)}
             </select>
           </Field>
           <Field label="Cost currency *">

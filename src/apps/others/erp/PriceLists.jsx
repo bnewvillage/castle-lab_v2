@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { t, btnG } from '../../pricing/styles';
-import { fetchAllItemsForErpAutomation, fetchProjectItems } from '../../../lib/db';
-import { PROJECT_BRAND, projectAsItem } from '../../../lib/rows';
+import { fetchPriceRows, withProjectBrand } from '../../../lib/erpPrices';
 import { downloadXLSX } from '../../../lib/xlsxExport';
 import { fetchReportsIndependently } from '../../../lib/erpReports';
 import { MARKETS, PRICE_COLUMNS } from '../../../lib/markets';
@@ -20,21 +19,6 @@ const CURRENCIES = MARKETS.map(m => m.currency);
 function detectItemKey(rows) {
   if (!rows?.length) return null;
   return ITEM_CODE_KEYS.find(k => rows.some(r => r?.[k])) ?? null;
-}
-
-/**
- * The prices an ERP list is matched against: the catalogue's and the project
- * items'. brands narrows it (empty = everything); PROJECT_BRAND in it stands
- * for the project items.
- */
-async function fetchPrices(brands = []) {
-  const scoped    = brands.length > 0;
-  const catalogue = brands.filter(b => b !== PROJECT_BRAND);
-  const [items, projects] = await Promise.all([
-    !scoped ? fetchAllItemsForErpAutomation() : catalogue.length ? fetchAllItemsForErpAutomation(catalogue) : [],
-    !scoped || brands.includes(PROJECT_BRAND) ? fetchProjectItems() : [],
-  ]);
-  return { rows: [...items, ...projects.map(projectAsItem)], projects: projects.length };
 }
 
 const dbLog = ({ rows, projects }) => `DB: ${rows.length.toLocaleString()} rows${projects ? `, ${projects.toLocaleString()} of them project items` : ''}.`;
@@ -61,10 +45,7 @@ function mergeByCode(erpRows, dbByCode, dbByBarcode, dbField) {
 export default function PriceLists({ creds, setCreds }) {
   const email = creds.email.trim(), password = creds.password.trim();
   const isConnected = !!(email && password);
-  const brands = useBrandList();
-  // Project items sit in the brand filter as one more brand.
-  const brandList = brands.some(b => b.brand_code === PROJECT_BRAND)
-    ? brands : [...brands, { brand_code: PROJECT_BRAND, brand_name: 'Project items' }];
+  const brandList = withProjectBrand(useBrandList());
 
   // ── Price Export ─────────────────────────────────────────────
   const [expBrands, setExpBrands] = useState([]);   // empty = all brands
@@ -73,7 +54,7 @@ export default function PriceLists({ creds, setCreds }) {
   const handlePriceExport = () => isConnected && exp.run(async (addLog) => {
     const scoped = expBrands.length > 0;
     addLog(scoped ? `Fetching DB prices for ${expBrands.length} brand(s)...` : 'Fetching DB prices...');
-    const db          = await fetchPrices(expBrands);
+    const db          = await fetchPriceRows({ brands: expBrands });
     const dbRows      = db.rows;
     addLog(dbLog(db));
     const dbByCode    = Object.fromEntries(dbRows.map(r => [codeKey(r.item_code), r]));
@@ -123,7 +104,7 @@ export default function PriceLists({ creds, setCreds }) {
     addLog(`Matching on "${itemKey}".`);
 
     addLog('Fetching DB prices...');
-    const db          = await fetchPrices();
+    const db          = await fetchPriceRows();
     const dbRows      = db.rows;
     const dbByCode    = Object.fromEntries(dbRows.map(r => [r.item_code?.toUpperCase(), r]));
     const dbByBarcode = Object.fromEntries(dbRows.filter(r => r.barcode).map(r => [String(r.barcode).toUpperCase(), r]));

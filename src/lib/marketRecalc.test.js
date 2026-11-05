@@ -21,14 +21,14 @@ describe('planMarketRecalc — KSA from UAE at the current factor', () => {
     expect(recalc([item()]).tally).toEqual({ ...NONE, same: 1 });
   });
 
-  test('a price at an old factor is out of step: listed, moved only on request — 580 → 570 SAR shelf', () => {
+  test('a price at an old factor is out of step: moved and listed, or left alone on request — 580 → 570 SAR shelf', () => {
     const it = item({ msrp_sar: old103(485.71), real_msrp_sar: old103(485.71) });
     expect(round2(it.msrp_sar * 1.15)).toBe(580);
-    const off = recalc([it]);
+    const off = recalc([it], { leaveOutOfStep: true });
     expect(off.tally).toEqual({ ...NONE, outOfStep: 1 });
     expect(off.changes).toHaveLength(0);
     expect(off.outOfStep[0]).toMatchObject({ code: 'TEST-1', before: 580, after: 570, uae: 510 });
-    const on = recalc([it], { includeOutOfStep: true });
+    const on = recalc([it]);
     expect(on.changes[0].set).toEqual({ msrp_sar: ksa(485.71), real_msrp_sar: ksa(485.71) });
     expect(on.changes[0].lines).toEqual([{ market: 'sar', before: 580, after: 570, status: 'outOfStep' }]);
   });
@@ -67,10 +67,10 @@ describe('planMarketRecalc — KSA from UAE at the current factor', () => {
       const aed = round2(prettifyShelf(v * 1.05) / 1.05);
       items.push(item({ item_code: `T${v}`, msrp_aed: aed, real_msrp_aed: aed, msrp_sar: old103(aed), real_msrp_sar: null }));
     }
-    const first = recalc(items, { includeOutOfStep: true });
+    const first = recalc(items);
     expect(first.changes.length).toBeGreaterThan(0);
     const applied = applyPlan(items, first);
-    expect(recalc(applied, { includeOutOfStep: true }).changes).toHaveLength(0);
+    expect(recalc(applied).changes).toHaveLength(0);
     for (const it of applied) expect(it.msrp_sar).toBe(ksa(it.msrp_aed));
   });
 });
@@ -107,14 +107,16 @@ describe('planMarketRecalc — fill and keep Kuwait from UAE', () => {
     for (const it of applied) expect(it.msrp_kwd).toBe(suggestKWDPrice(it.msrp_aed));
   });
 
-  test('hand-set Kuwait prices: flagged ones are skipped, unflagged ones listed but not moved', () => {
+  test('overrides are skipped; an out-of-step price moves and is listed, unless left alone', () => {
     const flagged   = item({ kwd_overridden: true, msrp_kwd: 39.9 });
     const unflagged = item({ item_code: 'TEST-2', msrp_kwd: 39.9 });
-    const { changes, outOfStep, tally } = recalc([flagged, unflagged]);
-    expect(tally.overridden).toBe(1);
-    expect(tally.outOfStep).toBe(1);
-    expect(outOfStep[0]).toMatchObject({ code: 'TEST-2', before: 39.9, after: 41 });
-    expect(changes.flatMap(c => Object.keys(c.set))).not.toContain('msrp_kwd');
+    const moved = recalc([flagged, unflagged]);
+    expect(moved.tally.overridden).toBe(1);
+    expect(moved.tally.outOfStep).toBe(1);
+    expect(moved.outOfStep[0]).toMatchObject({ code: 'TEST-2', before: 39.9, after: 41 });
+    expect(moved.changes[0]).toMatchObject({ item_code: 'TEST-2', set: { msrp_kwd: 41 } });
+    const left = recalc([flagged, unflagged], { leaveOutOfStep: true });
+    expect(left.changes.flatMap(c => Object.keys(c.set))).not.toContain('msrp_kwd');
   });
 });
 

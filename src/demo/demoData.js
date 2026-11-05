@@ -9,7 +9,7 @@
 // and rollbacks mutate it in place so the demo behaves like a real
 // backend for the length of a session. A page reload reseeds.
 // ─────────────────────────────────────────────────────────────
-import { calcMSRPs, calcCostBasedMSRPs, calcProjectPrice } from '../lib/pricing';
+import { calcMSRPs, itemPrices, calcProjectPrice } from '../lib/pricing';
 import { MARKETS, PRICE_COLUMNS, REAL_COLUMNS, FLAG_COLUMNS, DERIVED, MARKET } from '../lib/markets';
 import { round } from '../lib/num';
 
@@ -127,7 +127,7 @@ function buildBrandItems(def, rng) {
 
     if (costBased) {
       const target_margin_pct = pick(rng, [22, 25, 28, 30]);
-      const msrps = calcCostBasedMSRPs(exw_cost, cost_currency, target_margin_pct, RATES);
+      const msrps = itemPrices({ price_used: 'cost_based', exw_cost, cost_currency, target_margin_pct }, { rates: RATES });
       row = {
         ...row,
         price_used: 'cost_based',

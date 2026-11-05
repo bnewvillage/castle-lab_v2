@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { saveProjectItem } from '../../lib/db';
-import { calcProjectPrice, formatMargin, MARGIN_COLORS, DEFAULT_PROJECT_MARGIN_PCT } from '../../lib/pricing';
+import { calcProjectPrice, formatMargin, MARGIN_COLORS, DEFAULT_PROJECT_MARGIN_PCT, PROJECT_BRAND } from '../../lib/pricing';
 import { MARKETS, DERIVED, FLAG_COLUMNS, deriveMarket } from '../../lib/markets';
-import { PROJECT_BRAND } from '../../lib/rows';
+
 import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead } from './styles';
 import { toNum, hasNum, round, money } from '../../lib/num';
 import { useAuth } from '../../lib/AuthContext';

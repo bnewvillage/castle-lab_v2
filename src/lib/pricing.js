@@ -6,6 +6,7 @@
 import { toNum, round } from './num';
 import { prettifyShelf } from './shelfRounding';
 import { MARKETS, deriveMarkets } from './markets';
+import { PRICE_BASIS, isCostPriced, targetMargin, basisPrice } from './priceBases';
 
 // Compound two markups multiplicatively: base% + additional% applied on top
 // e.g. compoundMarkup(10, 5) = ((1.10 × 1.05) - 1) × 100 = 15.5%
@@ -27,40 +28,19 @@ export function calcLandedCost({ exw_cost, shipping_rate, customs_duty_rate, cos
   return inAED * (1 + (customs_duty_rate ?? 5.5) / 100);
 }
 
-// ── PRICE USED RESOLVER ───────────────────────────────────────
-
-/**
- * The MSRP a row is priced from, as { value, currency }.
- *
- * The single implementation for every caller — form state, an Excel row and a
- * database record all use the same field names, and toNum accepts strings and
- * numbers alike, so no caller needs its own copy of this map. Cost-priced rows
- * (isCostPriced) price from cost rather than a vendor MSRP and resolve to nulls.
- */
-export function resolvePriceUsed(item) {
-  const map = {
-    primary_ex_vat:    [item.msrp_primary_ex_vat,    item.msrp_primary_currency],
-    primary_inc_vat:   [item.msrp_primary_inc_vat,   item.msrp_primary_currency],
-    secondary_ex_vat:  [item.msrp_secondary_ex_vat,  item.msrp_secondary_currency],
-    secondary_inc_vat: [item.msrp_secondary_inc_vat, item.msrp_secondary_currency],
-  };
-  const [value, currency] = map[item.price_used] ?? [];
-  return { value: toNum(value), currency: currency || null };
-}
-
 // ── EXW MARGIN ────────────────────────────────────────────────
 
 /**
  * EXW margin — raw vendor price vs raw cost, both converted to AED
  * No markup, no shipping, no customs applied
  *
- * price_used_aed = price_used_value × price_currency_rate
- * cost_aed       = exw_cost × cost_currency_rate
- * exw_margin     = (price_used_aed - cost_aed) / price_used_aed × 100
+ * price_aed  = basis price × its currency's rate
+ * cost_aed   = exw_cost × cost_currency_rate
+ * exw_margin = (price_aed - cost_aed) / price_aed × 100
  */
 export function calcEXWMargin(item, rates) {
   if (item.exw_cost == null || !item.cost_currency || !rates?.[item.cost_currency]) return null;
-  const { value, currency } = resolvePriceUsed(item);
+  const { value, currency } = basisPrice(item);
   if (value == null || !currency || !rates?.[currency]) return null;
   const priceAED = value * rates[currency];
   const costAED  = item.exw_cost * rates[item.cost_currency];
@@ -97,69 +77,46 @@ export function calcAllMargins(item, rates) {
 
 // ── SUGGESTED PRICES ─────────────────────────────────────────
 
-export const DEFAULT_COST_MARGIN_PCT = 25;
-
-// The two ways a catalogue item is priced from its cost rather than a vendor
-// MSRP, both at target_margin_pct:
-//   cost_based         on the EXW cost alone
-//   landed_cost_based  on the fully landed cost (shipping and customs in), as
-//                      Project Items are priced
-const COST_PRICED = new Set(['cost_based', 'landed_cost_based']);
-export const isCostPriced = (priceUsed) => COST_PRICED.has(priceUsed);
-
 // The unrounded UAE shelf target (VAT-inclusive) for a vendor price after the
 // brand markup. Every UAE price is rounded from a target like this, exactly once.
-export function baseShelfFromPrice(priceUsedValue, priceCurrency, markupPercentage, rates) {
-  if (priceUsedValue == null || !priceCurrency || !rates?.[priceCurrency]) return null;
-  const inAED    = priceUsedValue * rates[priceCurrency];
+export function baseShelfFromPrice(priceValue, priceCurrency, markupPercentage, rates) {
+  if (priceValue == null || !priceCurrency || !rates?.[priceCurrency]) return null;
+  const inAED    = priceValue * rates[priceCurrency];
   const markedUp = inAED * (1 + markupPercentage / 100);
   return markedUp * 1.05;
 }
 
-// The unrounded UAE shelf target for an EXW cost at a target gross margin.
-// Pure EXW basis — no shipping, no customs (unlike calcProjectPrice).
-export function baseShelfFromCost(exwCost, costCurrency, targetMarginPct, rates) {
-  if (exwCost == null || !costCurrency || !rates?.[costCurrency]) return null;
-  const margin = (targetMarginPct ?? DEFAULT_COST_MARGIN_PCT) / 100;
-  if (!(margin > 0 && margin < 1)) return null;
-  const costAED = exwCost * rates[costCurrency];
+// The unrounded UAE shelf target that puts a cost (AED) at a target gross
+// margin. The one margin formula: both cost bases and project items use it.
+export function shelfAtMargin(costAED, marginPct) {
+  const margin = toNum(marginPct) / 100;
+  if (costAED == null || !(margin > 0 && margin < 1)) return null;
   return costAED / (1 - margin) * 1.05;
 }
 
-// The unrounded UAE shelf target for the fully landed cost at a target gross
-// margin: the basis calcProjectPrice prices project items on.
-export function baseShelfFromLanded(costInputs, targetMarginPct, rates) {
-  const landed = calcLandedCost(costInputs, rates);
-  if (landed == null) return null;
-  const margin = (targetMarginPct ?? DEFAULT_COST_MARGIN_PCT) / 100;
-  if (!(margin > 0 && margin < 1)) return null;
-  return landed / (1 - margin) * 1.05;
+// A cost-priced row's cost in AED on its basis: the EXW cost alone, or landed.
+function basisCostAED(item, rates) {
+  const exw = toNum(item.exw_cost);
+  if (exw == null || !item.cost_currency || !rates?.[item.cost_currency]) return null;
+  if (PRICE_BASIS[item.price_used].source === 'exw') return exw * rates[item.cost_currency];
+  return calcLandedCost({
+    exw_cost:          exw,
+    cost_currency:     item.cost_currency,
+    shipping_rate:     toNum(item.shipping_rate) ?? 0,
+    customs_duty_rate: toNum(item.customs_duty_rate) ?? 5.5,
+  }, rates);
 }
 
-// The unrounded target of a cost-priced row (form state, a sheet row or a
-// database record), by its price_used.
-export function costBaseShelf(item, rates) {
-  const margin = toNum(item.target_margin_pct);
-  if (item.price_used === 'landed_cost_based') {
-    return baseShelfFromLanded({
-      exw_cost:          toNum(item.exw_cost),
-      cost_currency:     item.cost_currency,
-      shipping_rate:     toNum(item.shipping_rate) ?? 0,
-      customs_duty_rate: toNum(item.customs_duty_rate) ?? 5.5,
-    }, margin, rates);
-  }
-  return baseShelfFromCost(toNum(item.exw_cost), item.cost_currency, margin, rates);
-}
-
-// The unrounded base target a pricing_master row's source implies.
+// The unrounded base target a row's price basis implies: form state, a sheet
+// row or a database record.
 export function itemBaseShelf(item, { markup, rates }) {
-  if (isCostPriced(item.price_used)) return costBaseShelf(item, rates);
-  const { value, currency } = resolvePriceUsed(item);
+  if (isCostPriced(item.price_used)) return shelfAtMargin(basisCostAED(item, rates), targetMargin(item));
+  const { value, currency } = basisPrice(item);
   return baseShelfFromPrice(value, currency, markup ?? 10, rates);
 }
 
-export function suggestUAEPrice(priceUsedValue, priceCurrency, markupPercentage, rates) {
-  const target = baseShelfFromPrice(priceUsedValue, priceCurrency, markupPercentage, rates);
+export function suggestUAEPrice(priceValue, priceCurrency, markupPercentage, rates) {
+  const target = baseShelfFromPrice(priceValue, priceCurrency, markupPercentage, rates);
   return target == null ? null : prettifyShelf(target) / 1.05;
 }
 
@@ -191,15 +148,13 @@ export function calcMSRPs(priceValue, priceCurrency, baseMarkupPct, additionalMa
   return msrpsFromBaseShelf(baseShelfFromPrice(priceValue, priceCurrency, baseMarkupPct, rates), additionalMarkupPct);
 }
 
-// Every price from EXW cost by enforcing a target gross margin.
-export function calcCostBasedMSRPs(exwCost, costCurrency, targetMarginPct, rates, additionalMarkupPct = null) {
-  return msrpsFromBaseShelf(baseShelfFromCost(exwCost, costCurrency, targetMarginPct, rates), additionalMarkupPct);
-}
-
-// Every price of a cost-priced row, EXW or landed by its price_used. The
-// brand's additional markup goes on top, as for any other basis.
-export function calcCostPricedMSRPs(item, rates, additionalMarkupPct = null) {
-  return msrpsFromBaseShelf(costBaseShelf(item, rates), additionalMarkupPct);
+/**
+ * Every price a row's source gives, on its price basis: the brand markup for
+ * an MSRP basis, the target margin for a cost basis, and the brand's additional
+ * markup on top of either. Null until there is enough input.
+ */
+export function itemPrices(item, { markup, additional, rates }) {
+  return msrpsFromBaseShelf(itemBaseShelf(item, { markup, rates }), additional ?? null);
 }
 
 // An additional markup on a stored, already-rounded base. Only for when the
@@ -259,36 +214,31 @@ export const MARGIN_COLORS = {
 
 // ── PROJECT ITEM PRICING ──────────────────────────────────────
 export const DEFAULT_PROJECT_MARGIN_PCT = 25;
+// Project items live in their own table under this code prefix: PRJT-….
+export const PROJECT_BRAND = 'PRJT';
 
 /**
- * Cost-driven pricing for project items.
- * landed = cost × rate × (1 + ship%) × (1 + duty%)
- * Targets target_margin_pct (default 25%) on landed cost, adds 5% UAE VAT,
- * then prettifies. Unlike calcCostBasedMSRPs this prices off the LANDED cost,
- * so shipping and customs are included in the margin base.
- * Returns { msrp_aed_inc_vat, msrp_aed_ex_vat, landed_cost_aed } or null.
+ * A project item's prices: landed cost + margin (default 25%) with no brand
+ * markup, through the same landed cost and margin formula as the catalogue's
+ * landed basis. Returns both UAE prices, every other market, and the landed
+ * figures the form shows; null until there is enough input.
  */
 export function calcProjectPrice({ cost, cost_currency, shipping_rate, customs_duty_rate, target_margin_pct }, rates) {
-  if (cost == null || cost === '' || !cost_currency || !rates?.[cost_currency]) return null;
-  const margin            = (target_margin_pct ?? DEFAULT_PROJECT_MARGIN_PCT) / 100;
-  if (!(margin > 0 && margin < 1)) return null;
-  const rate              = rates[cost_currency];
-  const ship              = (shipping_rate  ?? 0)   / 100;
-  const duty              = (customs_duty_rate ?? 5.5) / 100;
-  const costExCustomsSrc  = cost * (1 + ship);
-  const landedSrc         = costExCustomsSrc * (1 + duty);
-  const landedAED         = landedSrc * rate;
-  const raw               = landedAED / (1 - margin);   // gross margin target on landed cost
-  const incVat            = prettifyShelf(raw * 1.05);
-  const exVat             = round(incVat / 1.05, 2);
+  const marginPct = target_margin_pct ?? DEFAULT_PROJECT_MARGIN_PCT;
+  const landedAED = calcLandedCost({ exw_cost: cost, cost_currency, shipping_rate: shipping_rate ?? 0, customs_duty_rate: customs_duty_rate ?? 5.5 }, rates);
+  const shelf     = shelfAtMargin(landedAED, marginPct);
+  if (shelf == null) return null;
+  const costExCustomsSrc = cost * (1 + (shipping_rate ?? 0) / 100);
+  const incVat           = prettifyShelf(shelf);
+  const exVat            = round(incVat / 1.05, 2);
   return {
     msrp_aed_inc_vat:      round(incVat, 2),
     msrp_aed_ex_vat:       exVat,
     ...deriveMarkets(exVat),
     landed_cost_aed:       round(landedAED, 2),
-    target_margin_pct:     round(margin * 100, 2),
+    target_margin_pct:     round(marginPct, 2),
     cost_ex_customs_src:   round(costExCustomsSrc, 2),
-    landed_cost_src:       round(landedSrc, 2),
+    landed_cost_src:       round(costExCustomsSrc * (1 + (customs_duty_rate ?? 5.5) / 100), 2),
   };
 }
 
@@ -318,7 +268,7 @@ export function validateItem(item) {
   if (!item.brand_code)              errors.push('Brand is required');
   if (!item.cost_currency)           errors.push('Cost currency is required');
   if (!isCostPriced(item.price_used) && !item.msrp_primary_currency) errors.push('Primary MSRP currency is required');
-  if (!item.price_used)              errors.push('Price used must be selected');
+  if (!item.price_used)              errors.push('Price basis must be selected');
   if (!item.price_source)            errors.push('Price source is required');
   if (!item.cost_source)             errors.push('Cost source is required');
   return errors;

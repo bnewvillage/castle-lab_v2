@@ -7,11 +7,11 @@
 import * as XLSX from 'xlsx-js-style';
 import { fetchBrands, fetchRates } from './db';
 import { toNum } from './num';
-import { calcMSRPs, calcCostPricedMSRPs, isCostPriced, resolvePriceUsed } from './pricing';
+import { itemPrices } from './pricing';
+import { PRICE_BASIS_VALUES, isCostPriced, basisPrice } from './priceBases';
 import { PRICE_COLUMNS, REAL_COLUMNS } from './markets';
 import { CURRENCIES } from '../apps/pricing/styles';
 
-export const PRICE_USED_OPTIONS = ['primary_ex_vat','primary_inc_vat','secondary_ex_vat','secondary_inc_vat','cost_based','landed_cost_based'];
 export const SOURCES            = ['Portal','File','Website','Invoice','Estimate'];
 export const LARGE_THRESHOLD    = 5000;  // above this, paginate review and show progress
 export const REVIEW_PAGE_SIZE   = 100;   // rows per page in review / dup tables
@@ -20,8 +20,6 @@ export const MERGE_FIELDS = ['item_name','barcode','cost_currency','exw_cost','s
   'customs_duty_rate','msrp_primary_currency','msrp_primary_ex_vat','msrp_primary_inc_vat',
   'msrp_secondary_currency','msrp_secondary_ex_vat','msrp_secondary_inc_vat',
   'price_used','target_margin_pct','cost_source','price_source'];
-// Paste import writes primaries only, so the cost bases have no secondary fallback here.
-export const PASTE_PRICE_USED   = ['primary_ex_vat','primary_inc_vat','cost_based','landed_cost_based'];
 
 // ── TEMPLATE GENERATOR ────────────────────────────────────────
 export async function generateTemplate() {
@@ -50,7 +48,7 @@ export async function generateTemplate() {
     msrp_secondary_ex_vat:'Secondary MSRP ex VAT (optional)',
     msrp_secondary_inc_vat:'Secondary MSRP inc VAT (optional)',
     price_used:'Which MSRP drives pricing, or cost_based / landed_cost_based to derive the price from cost — see Reference sheet',
-    target_margin_pct:'Target gross margin % when price_used is cost_based (on EXW cost) or landed_cost_based (on landed cost: shipping and customs in) — default: 25',
+    target_margin_pct:'Target gross margin % when price_used is cost_based (on EXW cost, default 45) or landed_cost_based (on landed cost: shipping and customs in, default 40)',
     cost_source:'Where cost data came from — see Reference sheet',
     price_source:'Where price data came from — see Reference sheet',
     barcode:'Product barcode (optional) — stored as text',
@@ -78,12 +76,12 @@ export async function generateTemplate() {
 
   XLSX.utils.book_append_sheet(wb, importWs, 'Import');
 
-  const maxLen = Math.max(brands.length, PRICE_USED_OPTIONS.length, CURRENCIES.length, SOURCES.length);
+  const maxLen = Math.max(brands.length, PRICE_BASIS_VALUES.length, CURRENCIES.length, SOURCES.length);
   const refData = [
     ['brand_code','brand_name','','price_used options','','currencies','','sources'],
     ...Array.from({length:maxLen},(_,i) => [
       brands[i]?.brand_code||'', brands[i]?.brand_name||'', '',
-      PRICE_USED_OPTIONS[i]||'', '', CURRENCIES[i]||'', '', SOURCES[i]||'',
+      PRICE_BASIS_VALUES[i]||'', '', CURRENCIES[i]||'', '', SOURCES[i]||'',
     ]),
   ];
   const refWs = XLSX.utils.aoa_to_sheet(refData);
@@ -108,8 +106,8 @@ export function validateAndCalc(row, brandMap, markupCache, additionalMarkupCach
   if (String(row.exw_cost ?? '').trim() !== '' && toNum(row.exw_cost) == null) errors.push('exw_cost must be a number');
   const isCostBased = isCostPriced(row.price_used);
   if (!row.msrp_primary_currency && !isCostBased) errors.push('msrp_primary_currency is required');
-  if (!row.price_used || !PRICE_USED_OPTIONS.includes(row.price_used)) {
-    errors.push(`price_used must be one of: ${PRICE_USED_OPTIONS.join(', ')}`);
+  if (!row.price_used || !PRICE_BASIS_VALUES.includes(row.price_used)) {
+    errors.push(`price_used must be one of: ${PRICE_BASIS_VALUES.join(', ')}`);
   }
   if (row.cost_source && !SOURCES.includes(row.cost_source)) {
     errors.push(`cost_source must be one of: ${SOURCES.join(', ')}`);
@@ -118,7 +116,7 @@ export function validateAndCalc(row, brandMap, markupCache, additionalMarkupCach
     errors.push(`price_source must be one of: ${SOURCES.join(', ')}`);
   }
 
-  const { value: priceVal, currency: priceCurrency } = resolvePriceUsed(row);
+  const { value: priceVal, currency: priceCurrency } = basisPrice(row);
   if (!isCostBased && errors.length === 0 && priceVal == null) {
     errors.push(`No MSRP value found for price_used "${row.price_used}"`);
   }
@@ -127,10 +125,9 @@ export function validateAndCalc(row, brandMap, markupCache, additionalMarkupCach
     errors.push('target_margin_pct must be a number between 0 and 100');
   }
 
-  // Every market's prices via calcMSRPs / calcCostPricedMSRPs
-  const msrps = errors.length > 0 ? null : isCostBased
-    ? calcCostPricedMSRPs(row, rates, additionalMarkupCache[brandCode] ?? null)
-    : calcMSRPs(priceVal, priceCurrency, markupCache[brandCode] ?? 10, additionalMarkupCache[brandCode] ?? null, rates);
+  // Every market's prices, on the row's price basis
+  const msrps = errors.length > 0 ? null
+    : itemPrices(row, { markup: markupCache[brandCode] ?? 10, additional: additionalMarkupCache[brandCode], rates });
 
   return {
     ...row, brand_code: brandCode,

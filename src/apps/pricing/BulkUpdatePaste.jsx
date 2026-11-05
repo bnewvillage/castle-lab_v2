@@ -2,13 +2,13 @@ import { useState, useEffect } from 'react';
 import { toNum } from '../../lib/num';
 import * as XLSX from 'xlsx-js-style';
 import { fetchBrands, fetchRates, fetchItemsByCodes, bulkUpdateItemFields } from '../../lib/db';
-import { calcMSRPs, calcCostPricedMSRPs, isCostPriced, resolvePriceUsed } from '../../lib/pricing';
+import { itemPrices } from '../../lib/pricing';
+import { PRICE_BASIS, PASTE_BASIS_VALUES, isCostPriced, targetMargin } from '../../lib/priceBases';
 import { MARKETS } from '../../lib/markets';
 import { t, inp, sel, btnW, btnG, lbl, groupBox, groupHead, CURRENCIES } from './styles';
 import BrandSelect from './BrandSelect';
 
 const SOURCES         = ['Portal','File','Website','Invoice','Estimate'];
-const PRICE_USED_OPTS = ['primary_ex_vat','primary_inc_vat','cost_based','landed_cost_based'];
 const NO_CHANGE       = '';   // sentinel for "leave this column alone"
 
 // Columns pasted per row. A blank line leaves that field untouched for that item.
@@ -26,7 +26,7 @@ const ROW_FIELDS = PASTE_FIELDS.filter(f => f.key);
 const OPT_FIELDS = [
   { k:'cost_currency',         label:'Cost currency',   opts:CURRENCIES },
   { k:'msrp_primary_currency', label:'MSRP currency',   opts:CURRENCIES },
-  { k:'price_used',            label:'MSRP source',     opts:PRICE_USED_OPTS },
+  { k:'price_used',            label:'Price basis',     opts:PASTE_BASIS_VALUES },
   { k:'cost_source',           label:'Cost source',     opts:SOURCES },
   { k:'price_source',          label:'Price source',    opts:SOURCES },
   { k:'shipping_rate',         label:'Shipping %',      num:true, ph:'0' },
@@ -36,14 +36,11 @@ const OPT_FIELDS = [
 
 const PRICE_COLS = MARKETS.map(m => ({ k: m.price, label: `${m.short} price`, flag: m.flag, real: m.real }));
 
-// Only these feed the price calculation. Editing a name or barcode must never
-// trigger a price rewrite off whatever happens to be stored.
-const PRICE_INPUTS = new Set([
-  'exw_cost','msrp_primary_ex_vat','msrp_primary_inc_vat',
-  'cost_currency','msrp_primary_currency','price_used','target_margin_pct',
-]);
-// A landed-cost price is set by shipping and customs too.
-const LANDED_INPUTS = new Set(['shipping_rate','customs_duty_rate']);
+// Only a change to the price basis, or to a field the item's basis prices from
+// (PRICE_BASIS inputs), reprices it. Editing a name or barcode — or a cost on an
+// MSRP-priced item — must never rewrite prices off whatever happens to be stored.
+const repricedBy = (field, merged) =>
+  field === 'price_used' || !!PRICE_BASIS[merged.price_used]?.inputs.includes(field);
 const ALL_FIELDS = [...ROW_FIELDS, ...OPT_FIELDS];
 const LABELS = Object.fromEntries([...ALL_FIELDS, ...PRICE_COLS].map(f => [f.k, f.label]));
 const isNumField = (k) => !!ALL_FIELDS.find(f => f.k === k)?.num;
@@ -71,10 +68,7 @@ function sameValue(a, b, isNum) {
 
 function recalcPrices(merged, markup, additional, rates) {
   try {
-    if (isCostPriced(merged.price_used)) return calcCostPricedMSRPs(merged, rates, additional);
-    const { value, currency } = resolvePriceUsed(merged);
-    if (value == null || !currency) return null;
-    return calcMSRPs(value, currency, markup ?? 10, additional, rates);
+    return itemPrices(merged, { markup, additional, rates });
   } catch { return null; }
 }
 
@@ -180,8 +174,7 @@ export default function BulkUpdatePaste({ onToast, isViewer }) {
         const merged = { ...row };
         for (const [k, v] of Object.entries(incoming)) merged[k] = isNumField(k) ? toNum(v) : v;
         const rule   = rules[row.brand_code] || {};
-        const touchesPrice = diffs.some(d => PRICE_INPUTS.has(d.field)
-          || (LANDED_INPUTS.has(d.field) && merged.price_used === 'landed_cost_based'));
+        const touchesPrice = diffs.some(d => repricedBy(d.field, merged));
         const prices = touchesPrice ? recalcPrices(merged, rule.markup, rule.additional, rates) : null;
         if (prices) {
           for (const pc of PRICE_COLS) {
@@ -192,6 +185,11 @@ export default function BulkUpdatePaste({ onToast, isViewer }) {
               diffs.push({ field:pc.k, from:row[pc.k], to:prices[pc.k], computed:true, realField:pc.real, real:prices[pc.real] });
             }
           }
+        }
+
+        // A cost-priced item keeps the margin it was priced at (docs/adr/0001).
+        if (prices && isCostPriced(merged.price_used) && toNum(merged.target_margin_pct) == null) {
+          diffs.push({ field:'target_margin_pct', from:row.target_margin_pct ?? null, to:targetMargin(merged), computed:true });
         }
 
         if (diffs.length) changed.push({ item_code: row.item_code, sku, diffs });
@@ -212,7 +210,7 @@ export default function BulkUpdatePaste({ onToast, isViewer }) {
         const patch = { item_code: c.item_code };
         for (const d of c.diffs) {
           patch[d.field] = d.to;
-          if (d.computed) patch[d.realField] = d.real ?? null;
+          if (d.realField) patch[d.realField] = d.real ?? null;
         }
         return patch;
       });

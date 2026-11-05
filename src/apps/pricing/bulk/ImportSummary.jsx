@@ -1,6 +1,6 @@
 import { t, btnW, btnG } from '../styles';
 import { toNum } from '../../../lib/num';
-import { resolvePriceUsed } from '../../../lib/pricing';
+import { basisPrice } from '../../../lib/priceBases';
 
 // First screen after parsing: column fill rates and the EXW margin spread,
 // so a bad file is obvious before anyone reaches the row editor.
@@ -23,7 +23,7 @@ export default function ImportSummary({ rows, rates, isViewer, onBack, onNext, s
       const r8 = rates;
       const items = rows.map(r => {
         if (!r.exw_cost || !r.cost_currency || !r.price_used) return null;
-        const { value: priceVal, currency: priceCur } = resolvePriceUsed(r);
+        const { value: priceVal, currency: priceCur } = basisPrice(r);
         if (!priceVal || !priceCur) return null;
         const priceRate = r8[priceCur];
         const costRate  = r8[r.cost_currency];

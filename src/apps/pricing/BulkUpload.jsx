@@ -2,14 +2,14 @@ import React, { useState, useCallback, useEffect } from 'react';
 import * as XLSX from 'xlsx-js-style';
 import { toNum, money } from '../../lib/num';
 import { fetchBrands, fetchRates, bulkSaveItems, checkExisting, fetchItemsByCodes } from '../../lib/db';
-import { resolvePriceUsed, isCostPriced } from '../../lib/pricing';
+import { PRICE_BASIS_VALUES, isCostPriced, basisPrice } from '../../lib/priceBases';
 import { DERIVED, PRICE_COLUMNS } from '../../lib/markets';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, groupBox, groupHead, CURRENCIES } from './styles';
 import { useAuth } from '../../lib/AuthContext';
 import BrandSelect from './BrandSelect';
 import BulkUpdatePaste from './BulkUpdatePaste';
 import {
-  PRICE_USED_OPTIONS, SOURCES, LARGE_THRESHOLD, REVIEW_PAGE_SIZE, MERGE_FIELDS,
+  SOURCES, LARGE_THRESHOLD, REVIEW_PAGE_SIZE, MERGE_FIELDS,
   generateTemplate, validateAndCalc, processRows,
 } from '../../lib/bulkImport';
 import PastePanel from './bulk/PastePanel';
@@ -272,7 +272,7 @@ export default function BulkUpload({ onToast }) {
         const fails = [];
         if (r.cost_source && !SOURCES.includes(r.cost_source))   fails.push({ item_code: r.item_code, _rowNum: r._rowNum, field: 'cost_source',  value: r.cost_source });
         if (r.price_source && !SOURCES.includes(r.price_source)) fails.push({ item_code: r.item_code, _rowNum: r._rowNum, field: 'price_source', value: r.price_source });
-        if (!PRICE_USED_OPTIONS.includes(r.price_used))          fails.push({ item_code: r.item_code, _rowNum: r._rowNum, field: 'price_used',   value: r.price_used });
+        if (!PRICE_BASIS_VALUES.includes(r.price_used))          fails.push({ item_code: r.item_code, _rowNum: r._rowNum, field: 'price_used',   value: r.price_used });
         return fails;
       });
       if (preCheckFails.length) {
@@ -305,7 +305,7 @@ export default function BulkUpload({ onToast }) {
         const suspects = [];
         if (r.cost_source && !SOURCES.includes(r.cost_source))   suspects.push({ item_code: r.item_code, _rowNum: r._rowNum, field: 'cost_source',  value: r.cost_source });
         if (r.price_source && !SOURCES.includes(r.price_source)) suspects.push({ item_code: r.item_code, _rowNum: r._rowNum, field: 'price_source', value: r.price_source });
-        if (!PRICE_USED_OPTIONS.includes(r.price_used))          suspects.push({ item_code: r.item_code, _rowNum: r._rowNum, field: 'price_used',   value: r.price_used });
+        if (!PRICE_BASIS_VALUES.includes(r.price_used))          suspects.push({ item_code: r.item_code, _rowNum: r._rowNum, field: 'price_used',   value: r.price_used });
         return suspects;
       });
       if (suspectItems.length) setErrorItems(suspectItems);
@@ -325,7 +325,7 @@ export default function BulkUpload({ onToast }) {
     brand_code:            {},  // handled by BrandSelect, not EditCell
     cost_currency:         { options: CURRENCIES },
     msrp_primary_currency: { options: CURRENCIES },
-    price_used:            { options: PRICE_USED_OPTIONS },
+    price_used:            { options: PRICE_BASIS_VALUES },
     cost_source:           { options: SOURCES },
     price_source:          { options: SOURCES },
     item_code:             { isText: true },
@@ -623,7 +623,7 @@ export default function BulkUpload({ onToast }) {
           <table style={{ width:'100%', borderCollapse:'collapse' }}>
             <thead>
               <tr style={{ background:t.bg3, borderBottom:`1px solid ${t.b2}` }}>
-                {['Row','Status','Item code','Item name','Brand','Cost curr.','MSRP curr.','Price used','Margin %','MSRP value','→ UAE',...DERIVED.map(m=>`→ ${m.short}`),'EXW cost','Cost src.','Price src.',''].map(h=>(
+                {['Row','Status','Item code','Item name','Brand','Cost curr.','MSRP curr.','Price basis','Margin %','MSRP value','→ UAE',...DERIVED.map(m=>`→ ${m.short}`),'EXW cost','Cost src.','Price src.',''].map(h=>(
                   <th key={h} style={{ padding:'10px 14px', textAlign:'left', fontSize:11, color:t.t2, fontFamily:'var(--font-mono)', textTransform:'uppercase', letterSpacing:'0.05em', whiteSpace:'nowrap', fontWeight:600 }}>{h}</th>
                 ))}
               </tr>
@@ -633,7 +633,7 @@ export default function BulkUpload({ onToast }) {
                 const filteredWithIdx = rows.map((row, i) => ({ row, i })).filter(({ row }) => !showErrorsOnly || row._status === 'error');
                 const pageItems = filteredWithIdx.slice(reviewPage * REVIEW_PAGE_SIZE, (reviewPage + 1) * REVIEW_PAGE_SIZE);
                 return pageItems.map(({ row, i }) => {
-                const { value: priceVal } = resolvePriceUsed(row);
+                const { value: priceVal } = basisPrice(row);
                 const priceCurr = row.price_used?.startsWith('primary') ? row.msrp_primary_currency : row.msrp_secondary_currency;
                 const isErr = row._status === 'error';
 

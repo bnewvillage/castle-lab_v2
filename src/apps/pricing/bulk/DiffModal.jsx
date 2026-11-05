@@ -1,6 +1,6 @@
 import { t, btnG } from '../styles';
 import { toNum } from '../../../lib/num';
-import { resolvePriceUsed } from '../../../lib/pricing';
+import { basisPrice } from '../../../lib/priceBases';
 
 // ── DIFF MODAL ────────────────────────────────────────────────
 // Shows before/after for every duplicate item being updated, plus aggregate margin stats.
@@ -15,7 +15,7 @@ export default function DiffModal({ items, existingItems, rates, onClose }) {
   const dColor  = d => d == null ? t.t4 : d > 0.05 ? t.green : d < -0.05 ? t.red : t.t4;
 
   const getMargin = (item) => {
-    const { value: pv, currency: pc } = resolvePriceUsed(item);
+    const { value: pv, currency: pc } = basisPrice(item);
     if (!pv || !pc) return null;
     const pr = rates[pc];
     const cr = rates[item.cost_currency];
@@ -37,8 +37,8 @@ export default function DiffModal({ items, existingItems, rates, onClose }) {
     const exwAedA  = exwA.value != null && rates[exwA.currency]  ? exwA.value  * rates[exwA.currency]  : null;
     const exwDelta = exwAedB && exwAedA ? ((exwAedA - exwAedB) / Math.abs(exwAedB)) * 100 : null;
 
-    const priceB    = resolvePriceUsed(dbRow);
-    const priceA    = resolvePriceUsed(fileRow);
+    const priceB    = basisPrice(dbRow);
+    const priceA    = basisPrice(fileRow);
     const prAedB    = priceB.value && rates[priceB.currency] ? priceB.value * rates[priceB.currency] : null;
     const prAedA    = priceA.value && rates[priceA.currency] ? priceA.value * rates[priceA.currency] : null;
     const priceDelta = prAedB && prAedA ? ((prAedA - prAedB) / Math.abs(prAedB)) * 100 : null;
@@ -126,7 +126,7 @@ export default function DiffModal({ items, existingItems, rates, onClose }) {
           <table style={{ width:'100%', borderCollapse:'collapse' }}>
             <thead style={{ position:'sticky', top:0, background:t.bg3, zIndex:1 }}>
               <tr style={{ borderBottom:`1px solid ${t.b2}` }}>
-                {['Item code','EXW cost','Δ EXW','Price used','Δ Price','EXW margin','Δ Margin','MSRP AED','Δ MSRP'].map(h => (
+                {['Item code','EXW cost','Δ EXW','Price basis','Δ Price','EXW margin','Δ Margin','MSRP AED','Δ MSRP'].map(h => (
                   <th key={h} style={thSt}>{h}</th>
                 ))}
               </tr>

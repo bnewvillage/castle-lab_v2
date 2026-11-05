@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { fetchItemList, fetchHistory, deleteItem } from '../../lib/db';
-import { calcAllMargins, calcEmployeePrice, formatMargin, MARGIN_COLORS, resolvePriceUsed } from '../../lib/pricing';
+import { calcAllMargins, calcEmployeePrice, formatMargin, MARGIN_COLORS } from '../../lib/pricing';
+import { basisPrice } from '../../lib/priceBases';
 import { money } from '../../lib/num';
 import { MARKETS, PRICE_COLUMNS } from '../../lib/markets';
-import { t, inp, sel, btnW, btnG, btnSm, lbl, PRICE_USED_OPTIONS } from './styles';
+import { t, inp, sel, btnW, btnG, btnSm, lbl } from './styles';
 import { useAuth } from '../../lib/AuthContext';
 import BrandSelect from './BrandSelect';
 import { flattenItem, downloadFullTableXLSX } from '../../lib/csvExport';
@@ -148,7 +149,7 @@ function InlineSummary({ item, rates }) {
                     <span style={labelStyle}>EXW margin</span>
                     <div style={{ textAlign:'right' }}>
                       <span style={{ color:MARGIN_COLORS[exwFmt.status], fontSize:12, fontWeight:500 }}>{exwFmt.label}</span>
-                      <div style={{ fontSize:10, color:t.t4, marginTop:1 }}>price used vs cost · no markup</div>
+                      <div style={{ fontSize:10, color:t.t4, marginTop:1 }}>basis price vs cost · no markup</div>
                     </div>
                   </div>
                 );
@@ -483,7 +484,7 @@ export default function ItemList({ rates, brands, onEditItem, maximized, setExpo
               </thead>
               <tbody>
                 {rows.map((item,i) => {
-                  const msrp    = resolvePriceUsed(item);
+                  const msrp    = basisPrice(item);
                   const margins = item._margins;
                   const m       = formatMargin(margins?.uae_margin);
                   const landed  = margins?.landed_cost_aed;

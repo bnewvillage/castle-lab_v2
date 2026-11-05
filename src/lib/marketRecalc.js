@@ -15,20 +15,19 @@ const same = (a, b) => a != null && b != null && round(a, 3) === round(b, 3);
 /**
  * Plans one derived market's recalculation (key: 'sar', 'kwd', …).
  *
- * A market with no price yet (Kuwait at launch) is filled. A price that differs
- * from what its UAE price gives today was not left that way by the rule:
- * usually the UAE price was changed by hand afterwards, or a Mass Override left
- * this market unchanged on purpose. That is no reason to overwrite it, so those
- * are listed and moved only with includeOutOfStep.
+ * A market with no price yet (Kuwait at launch) is filled. A price that is out
+ * of step — not an override, yet not what its UAE price gives today — is not
+ * deliberate (CONTEXT.md): it moves too, and is listed so its rises are seen
+ * first. leaveOutOfStep keeps them where they are for one run.
  *
- * Skipped: the market overridden (hand-set), and no UAE price to derive from.
+ * Skipped: the market's overrides, and items with no UAE price to derive from.
  * The base price (real_msrp_*) follows real_msrp_aed the same way.
  *
- * tally: change (shelf price fills or moves) · outOfStep (doesn't follow UAE;
- *        moved only with includeOutOfStep) · baseOnly (only the base price
- *        moves) · same · overridden · noUae
+ * tally: change (shelf price fills or follows UAE) · outOfStep (was out of step;
+ *        moves unless leaveOutOfStep) · baseOnly (only the base price moves)
+ *        · same · overridden · noUae
  */
-export function planMarketRecalc(items, key, { includeOutOfStep = false } = {}) {
+export function planMarketRecalc(items, key, { leaveOutOfStep = false } = {}) {
   const m = MARKET[key];
   const tally = { change: 0, outOfStep: 0, baseOnly: 0, same: 0, overridden: 0, noUae: 0 };
   const changes = [], outOfStep = [];
@@ -46,13 +45,13 @@ export function planMarketRecalc(items, key, { includeOutOfStep = false } = {}) 
       } else {
         stepped = true;
         outOfStep.push({ ...line, code: item.item_code, name: item.item_name ?? '', uae: shelfOf(UAE, aed) });
-        if (includeOutOfStep) { set[m.price] = next; lines.push({ ...line, status: 'outOfStep' }); }
+        if (!leaveOutOfStep) { set[m.price] = next; lines.push({ ...line, status: 'outOfStep' }); }
       }
     }
     const realAed = toNum(item[UAE.real]);
     if (realAed != null) {
       const realNext = deriveMarket(m, realAed);
-      if (!same(realNext, item[m.real]) && (item[m.real] == null || includeOutOfStep)) set[m.real] = realNext;
+      if (!same(realNext, item[m.real]) && (item[m.real] == null || !leaveOutOfStep)) set[m.real] = realNext;
     }
     if (stepped) tally.outOfStep++;
     if (!Object.keys(set).length) { if (!stepped) tally.same++; continue; }
@@ -72,5 +71,7 @@ export function planMarketRecalc(items, key, { includeOutOfStep = false } = {}) 
       lines,
     });
   }
+  // Largest rises first: what to look at before applying.
+  outOfStep.sort((a, b) => (b.after - b.before) - (a.after - a.before));
   return { changes, outOfStep, tally, scanned: items.length };
 }

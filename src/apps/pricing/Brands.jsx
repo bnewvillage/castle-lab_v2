@@ -1,18 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { fetchBrandsWithStats, updateBrandMarkup, insertBrand, fetchBrandItems, bulkUpdateMarkupPrices } from '../../lib/db';
-import { calcEXWMargin, calcLandedCost, calcMargin, formatMargin, MARGIN_COLORS, resolvePriceUsed, compoundMarkup, calcMSRPs } from '../../lib/pricing';
+import { calcEXWMargin, calcLandedCost, calcMargin, formatMargin, MARGIN_COLORS, compoundMarkup, calcMSRPs } from '../../lib/pricing';
+import { PRICE_BASIS, basisPrice } from '../../lib/priceBases';
 import { MARKETS, UAE, DERIVED, deriveMarket } from '../../lib/markets';
 import { t, inp, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead } from './styles';
 import { useAuth } from '../../lib/AuthContext';
 
-const PRICE_USED_LABELS = {
-  cost_based:       'Cost based',
-  landed_cost_based: 'Landed cost',
-  primary_ex_vat:   'Pri ex VAT',
-  primary_inc_vat:  'Pri inc VAT',
-  secondary_ex_vat: 'Sec ex VAT',
-  secondary_inc_vat:'Sec inc VAT',
-};
 
 const thStyle = {
   padding:'11px 16px', textAlign:'left', fontSize:11, color:t.t2,
@@ -202,7 +195,7 @@ function ContextMenu({ x, y, brand, isExpanded, onToggle, onEdit, onDismiss, isV
 // other markets from the new UAE prices — each unless hand-set.
 function computeChanges(items, newMarkup, additionalMarkupPct, rates) {
   return items.map(item => {
-    const { value: priceVal, currency: priceCur } = resolvePriceUsed(item);
+    const { value: priceVal, currency: priceCur } = basisPrice(item);
 
     // Default to existing values
     let aed     = item.msrp_aed;
@@ -531,7 +524,7 @@ export default function Brands({ rates = {}, onToast, refreshKey }) {
                 <th style={{ ...thStyle, minWidth:100, textAlign:'right' }}>Additional %</th>
                 <th style={{ ...thStyle, minWidth:100, textAlign:'right' }}>Effective %</th>
                 <th style={{ ...thStyle, minWidth:80, textAlign:'right' }}>SKUs</th>
-                <th style={{ ...thStyle, minWidth:300 }}>Price used (distinct)</th>
+                <th style={{ ...thStyle, minWidth:300 }}>Price basis (distinct)</th>
                 <th style={{ ...thStyle, minWidth:80 }}></th>
               </tr>
             </thead>
@@ -597,7 +590,7 @@ export default function Brands({ rates = {}, onToast, refreshKey }) {
                           <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
                             {brand.price_used_types.map(type => (
                               <span key={type} style={{ fontSize:11, padding:'3px 10px', background:'rgba(255,255,255,0.05)', border:`1px solid ${t.b2}`, borderRadius:100, color:t.t2, fontFamily:'var(--font-mono)' }}>
-                                {PRICE_USED_LABELS[type] || type}
+                                {PRICE_BASIS[type]?.short || type}
                               </span>
                             ))}
                           </div>

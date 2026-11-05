@@ -6,9 +6,8 @@
 // ─────────────────────────────────────────────────────────────
 import { toNum } from './num';
 import { MARKETS, UAE, DERIVED, PRICE_COLUMNS, REAL_COLUMNS, FLAG_COLUMNS, HISTORY_COLUMNS } from './markets';
-
-// Project items live in their own table under this code prefix: PRJT-….
-export const PROJECT_BRAND = 'PRJT';
+import { PROJECT_BRAND } from './pricing';
+import { isCostPriced, targetMargin } from './priceBases';
 
 const numbers = (item, columns) => Object.fromEntries(columns.map(c => [c, toNum(item[c])]));
 const flags   = (item) => Object.fromEntries(FLAG_COLUMNS.map(c => [c, !!item[c]]));
@@ -30,7 +29,8 @@ export function itemRow(item) {
     msrp_secondary_inc_vat:   toNum(item.msrp_secondary_inc_vat),
     msrp_secondary_currency:  item.msrp_secondary_currency || null,
     price_used:               item.price_used || null,
-    target_margin_pct:        toNum(item.target_margin_pct),
+    // A cost-priced item keeps the margin it was priced at (docs/adr/0001).
+    target_margin_pct:        isCostPriced(item.price_used) ? targetMargin(item) : toNum(item.target_margin_pct),
     price_source:             item.price_source || null,
     ...numbers(item, [...PRICE_COLUMNS, ...REAL_COLUMNS]),
     ...flags(item),

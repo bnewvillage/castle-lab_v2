@@ -1,4 +1,5 @@
-import { projectAsItem, PROJECT_BRAND } from './rows';
+import { projectAsItem } from './rows';
+import { PROJECT_BRAND } from './pricing';
 
 test('a project item matches like a catalogue row: UAE at its ex-VAT price, every market', () => {
   const p = {

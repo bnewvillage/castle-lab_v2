@@ -2,9 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchBrandRule, fetchBrandDefaults, searchItems, fetchItem, fetchHistory, saveItem } from '../../lib/db';
 import { toNum, hasNum, round, money } from '../../lib/num';
-import { calcAllMargins, calcEmployeePrice, formatMargin, MARGIN_COLORS, calcMSRPs, calcCostPricedMSRPs, isCostPriced, DEFAULT_COST_MARGIN_PCT, resolvePriceUsed } from '../../lib/pricing';
+import { calcAllMargins, calcEmployeePrice, formatMargin, MARGIN_COLORS, itemPrices } from '../../lib/pricing';
+import { PRICE_BASES, PRICE_BASIS, isCostPriced, basisNeeds, basisPrice, targetMargin } from '../../lib/priceBases';
 import { MARKETS, DERIVED, PRICE_COLUMNS, REAL_COLUMNS, FLAG_COLUMNS, deriveMarkets } from '../../lib/markets';
-import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead, segDiv, CURRENCIES, SOURCES, PRICE_USED_OPTIONS } from './styles';
+import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead, segDiv, CURRENCIES, SOURCES } from './styles';
 import BrandSelect from './BrandSelect';
 import { useAuth } from '../../lib/AuthContext';
 import { downloadXLSX } from '../../lib/xlsxExport';
@@ -17,11 +18,9 @@ import { downloadXLSX } from '../../lib/xlsxExport';
  */
 function derivePrices(form, { markup, additionalMarkup, rates }) {
   if (!form.price_used) return null;
-  if (isCostPriced(form.price_used)) return calcCostPricedMSRPs(form, rates, additionalMarkup ?? null);
-  if (markup == null) return null;
-  const { value, currency } = resolvePriceUsed(form);
-  if (value == null || !currency) return null;
-  return calcMSRPs(value, currency, markup, additionalMarkup ?? null, rates);
+  // An MSRP basis waits for the brand's markup to load.
+  if (!isCostPriced(form.price_used) && markup == null) return null;
+  return itemPrices(form, { markup, additional: additionalMarkup, rates });
 }
 
 // ── ROOT ──────────────────────────────────────────────────────
@@ -302,8 +301,9 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
       form.uae_overridden,markup,additionalMarkup,viewMode]);
 
   const hasVal = hasNum;
-  const availablePriceUsed = PRICE_USED_OPTIONS.filter(o => hasVal(form[o.needs]));
-  const priceUsedOptions   = availablePriceUsed.length>0 ? availablePriceUsed : PRICE_USED_OPTIONS;
+  const availableBases = PRICE_BASES.filter(b => hasVal(form[basisNeeds(b)]));
+  const basisOptions   = availableBases.length>0 ? availableBases : PRICE_BASES;
+  const basis          = PRICE_BASIS[form.price_used];
   const itemCode = form.brand_code&&form.sku_suffix ? `${form.brand_code}-${form.sku_suffix}` : '';
 
   const asItem = () => ({
@@ -318,7 +318,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
     msrp_secondary_ex_vat:  hasVal(form.msrp_secondary_ex_vat)?toNum(form.msrp_secondary_ex_vat):null,
     msrp_secondary_inc_vat: hasVal(form.msrp_secondary_inc_vat)?toNum(form.msrp_secondary_inc_vat):null,
     ...Object.fromEntries([...PRICE_COLUMNS, ...REAL_COLUMNS].map(c => [c, toNum(form[c])])),
-    target_margin_pct:      isCostPriced(form.price_used) ? (hasVal(form.target_margin_pct)?toNum(form.target_margin_pct):DEFAULT_COST_MARGIN_PCT) : null,
+    target_margin_pct:      isCostPriced(form.price_used) ? targetMargin(form) : null,
   });
 
   const item    = asItem();
@@ -335,9 +335,9 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
       setEstimateError('Enter a margin % between 0 and 100');
       return;
     }
-    const { value: priceVal, currency: priceCurrency } = resolvePriceUsed(form);
+    const { value: priceVal, currency: priceCurrency } = basisPrice(form);
     if (priceVal == null || !priceCurrency) {
-      setEstimateError('Select a price used and fill MSRP first');
+      setEstimateError('Select a price basis and fill MSRP first');
       return;
     }
     const priceRate     = rates[priceCurrency] || 1;
@@ -415,7 +415,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
   );
 
   const costHint   = hint      ? `common: ${hint.cost_currency||'?'} · ${hint.shipping_rate??'?'}% · ${hint.customs_duty_rate??'?'}% duty · ${hint.cost_source||'?'}` : '';
-  const priceHint2 = priceHint ? `common: ${priceHint.msrp_primary_currency||'?'} · ${PRICE_USED_OPTIONS.find(o=>o.value===priceHint.price_used)?.label||'?'} · ${priceHint.price_source||'?'}` : '';
+  const priceHint2 = priceHint ? `common: ${priceHint.msrp_primary_currency||'?'} · ${PRICE_BASIS[priceHint.price_used]?.label||'?'} · ${priceHint.price_source||'?'}` : '';
 
   return (
     <>
@@ -494,7 +494,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
             {[
               ['Landed cost',margins?.landed_cost_aed?`AED ${margins.landed_cost_aed.toFixed(2)}`:'—',t.t1],
               ['Employee price',money(emp,'AED'),t.amber],
-              ['Price used',PRICE_USED_OPTIONS.find(o=>o.value===form.price_used)?.label||'—',t.t3],
+              ['Price basis',basis?.label||'—',t.t3],
               ['Item code',itemCode||'—',t.t3],
             ].map(([label,value,color])=>(
               <div key={label} style={{display:'flex',justifyContent:'space-between',padding:'10px 0',borderBottom:`1px solid ${t.b1}`,fontSize:13}}>
@@ -565,12 +565,12 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
           <div style={{display:'flex',flexDirection:'column',gap:16}}>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
               <div style={fg}>
-                <label style={lbl}>Price used</label>
+                <label style={lbl}>Price basis</label>
                 <select {...S('price_used',fieldErrs.price_used)}>
                   <option value="">Select...</option>
-                  {priceUsedOptions.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
+                  {basisOptions.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
-                <span style={sub}>{availablePriceUsed.length>0?`${availablePriceUsed.length} option${availablePriceUsed.length>1?'s':''} from filled MSRP`:'Fill MSRP above to filter'}</span>
+                <span style={sub}>{availableBases.length>0?`${availableBases.length} option${availableBases.length>1?'s':''} from filled MSRP`:'Fill MSRP above to filter'}</span>
               </div>
               <div style={fg}>
                 <label style={lbl}>Price source</label>
@@ -583,11 +583,9 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
             </div>
             {isCostPriced(form.price_used) && (
               <div style={fg}>
-                <label style={lbl}>Target margin (%) <span style={{color:t.t4,fontWeight:400,textTransform:'none',letterSpacing:0}}>default {DEFAULT_COST_MARGIN_PCT}</span></label>
-                <input {...I('target_margin_pct',fieldErrs.target_margin_pct)} type="text" inputMode="decimal" placeholder={String(DEFAULT_COST_MARGIN_PCT)}/>
-                <span style={sub}>{form.price_used==='landed_cost_based'
-                  ? 'Price = landed cost in AED (EXW + shipping, + customs) ÷ (1 − margin) · reprices when shipping or customs change'
-                  : 'Price = EXW cost in AED ÷ (1 − margin) · shipping & customs excluded'}</span>
+                <label style={lbl}>Target margin (%) <span style={{color:t.t4,fontWeight:400,textTransform:'none',letterSpacing:0}}>default {basis.defaultMargin}</span></label>
+                <input {...I('target_margin_pct',fieldErrs.target_margin_pct)} type="text" inputMode="decimal" placeholder={String(basis.defaultMargin)}/>
+                <span style={sub}>{basis.marginRule}</span>
               </div>
             )}
             <div style={fg}>
@@ -604,7 +602,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
                   {form.uae_overridden?'Revert':'Override'}
                 </button>
               </div>
-              <span style={sub}>{`Ex-VAT · ${form.price_used==='landed_cost_based'?'derived from landed cost at target margin':form.price_used==='cost_based'?'derived from cost at target margin':'brand markup applied'} · override to set manually · ${DERIVED.map(m=>m.short).join('/')} recalc on change`}</span>
+              <span style={sub}>{`Ex-VAT · ${basis?.describe ?? 'brand markup applied'} · override to set manually · ${DERIVED.map(m=>m.short).join('/')} recalc on change`}</span>
             </div>
             {DERIVED.map(m=>(
               <div key={m.key} style={fg}>
@@ -727,7 +725,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
           {key:'msrp_primary_ex_vat', label:'Primary MSRP ex', fmt:v=>v!=null?`${it.msrp_primary_currency} ${Number(v).toLocaleString()}`:'—'},
           {key:'msrp_primary_inc_vat',label:'Primary MSRP inc',fmt:v=>v!=null?`${it.msrp_primary_currency} ${Number(v).toLocaleString()}`:'—'},
           ...MARKETS.map(mk=>({key:mk.price, label:`${mk.short} price`, fmt:v=>money(v,mk.currency)})),
-          {key:'price_used',          label:'Price used',      fmt:v=>PRICE_USED_OPTIONS.find(o=>o.value===v)?.label||v||'—'},
+          {key:'price_used',          label:'Price basis',     fmt:v=>PRICE_BASIS[v]?.label||v||'—'},
           {key:'target_margin_pct',   label:'Target margin',   fmt:v=>v!=null?v+'%':'—'},
           {key:'price_source',        label:'Price source',    fmt:v=>v||'—'},
           {key:'cost_source',         label:'Cost source',     fmt:v=>v||'—'},
@@ -809,7 +807,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
               ):(
                 <>
                   {[['Item code',it.item_code],['Item name',it.item_name],['Brand',it.brand_code],
-                    ['Barcode',it.barcode||'—'],['Price used',PRICE_USED_OPTIONS.find(o=>o.value===it.price_used)?.label||'—'],
+                    ['Barcode',it.barcode||'—'],['Price basis',PRICE_BASIS[it.price_used]?.label||'—'],
                     ['Price source',it.price_source||'—'],['Cost source',it.cost_source||'—'],
                   ].map(([label,val])=>(
                     <div key={label} style={{display:'flex',justifyContent:'space-between',padding:'9px 0',borderBottom:`1px solid ${t.b1}`,fontSize:14}}>

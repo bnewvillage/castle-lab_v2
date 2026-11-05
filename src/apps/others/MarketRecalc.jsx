@@ -15,7 +15,7 @@ export default function MarketRecalc({ market }) {
   const fmt = (v) => (v == null ? '—' : v.toLocaleString(undefined, M.dp === 3 ? { minimumFractionDigits: 3, maximumFractionDigits: 3 } : undefined));
   const { user, isViewer } = useAuth();
   const [items,    setItems]    = useState(null);   // the catalogue as read at preview
-  const [include,  setInclude]  = useState(false);  // also move prices out of step with UAE
+  const [leave,    setLeave]    = useState(false);  // keep out-of-step prices where they are this run
   const [busy,     setBusy]     = useState(false);
   const [progress, setProgress] = useState('');
   const [err,      setErr]      = useState('');
@@ -31,7 +31,7 @@ export default function MarketRecalc({ market }) {
     } finally { setBusy(false); setProgress(''); }
   };
 
-  const plan = items ? planMarketRecalc(items, market, { includeOutOfStep: include }) : null;
+  const plan = items ? planMarketRecalc(items, market, { leaveOutOfStep: leave }) : null;
 
   const apply = async () => {
     setConfirm(false); setBusy(true); setErr('');
@@ -47,7 +47,7 @@ export default function MarketRecalc({ market }) {
         applied_by:     user?.email ?? null,
         item_count:     planned,
         brand_count:    new Set(plan.changes.map(c => c.brand_code)).size,
-        metadata:       { factor: M.factor, include_out_of_step: include },
+        metadata:       { factor: M.factor, left_out_of_step: leave },
       });
       const applied = await applyPriceChanges(batchId, plan.changes,
         (done, ok) => setProgress(`Applying… ${done.toLocaleString()} of ${planned.toLocaleString()} (${ok.toLocaleString()} updated)`),
@@ -67,10 +67,10 @@ export default function MarketRecalc({ market }) {
   const largest = [...changed].sort((a, b) => Math.abs(b.after - b.before) - Math.abs(a.after - a.before)).slice(0, 10);
   const pct     = changed.map(m => (m.after - m.before) / m.before * 100).filter(Number.isFinite);
   const avgPct  = pct.length ? pct.reduce((s, v) => s + v, 0) / pct.length : 0;
-  const shelfMoves = plan ? plan.tally.change + (include ? plan.tally.outOfStep : 0) : 0;
+  const shelfMoves = plan ? plan.tally.change + (leave ? 0 : plan.tally.outOfStep) : 0;
 
   const exportChanges = () => {
-    const status = (c) => c.lines[0]?.status === 'outOfStep' ? 'out of step with UAE: included'
+    const status = (c) => c.lines[0]?.status === 'outOfStep' ? 'out of step with UAE: follows it again'
       : c.lines[0]?.before == null && c.lines.length ? 'new price' : c.lines.length ? 'follows UAE' : 'base price only';
     const rows = plan.changes.map(c => ({
       item_code: c.item_code, item_name: c.item_name, brand_code: c.brand_code, status: status(c),
@@ -79,7 +79,7 @@ export default function MarketRecalc({ market }) {
       [`${M.price}_before`]: c.expect[M.price], [`${M.price}_after`]: c.set[M.price] ?? c.expect[M.price],
       [`${M.real}_before`]: c.expect[M.real], [`${M.real}_after`]: c.set[M.real] ?? c.expect[M.real],
     }));
-    if (!include) rows.push(...plan.outOfStep.map(o => ({
+    if (leave) rows.push(...plan.outOfStep.map(o => ({
       item_code: o.code, item_name: o.name, brand_code: null, status: 'out of step with UAE: left alone',
       uae_shelf: o.uae, shelf_before: o.before, shelf_after: o.after,
     })));
@@ -145,14 +145,14 @@ export default function MarketRecalc({ market }) {
           {plan.outOfStep.length > 0 && (
             <div style={{ marginTop: 16, background: 'rgba(245,166,35,0.06)', border: '1px solid rgba(245,166,35,0.25)', borderRadius: 8, padding: '12px 14px' }}>
               <div style={{ fontSize: 13, color: t.t2, lineHeight: 1.6 }}>
-                <strong style={{ color: t.amber }}>{plan.outOfStep.length.toLocaleString()} {M.label} prices don't follow their UAE price today</strong> —
-                they aren't what UAE × {M.factor} gives. Usually the UAE price was changed by hand after the {M.label} price
-                was set, or a Mass Override left {M.label} unchanged on purpose. They're left alone unless you include them;
-                including them makes {M.label} follow UAE again, and some go up.
+                <strong style={{ color: t.amber }}>{plan.outOfStep.length.toLocaleString()} {M.label} prices are out of step with UAE</strong> —
+                they aren't what UAE × {M.factor} gives, and they aren't overrides, so this run moves them to follow UAE
+                again. Some go up: the largest rises are listed first. To keep a price where it is for good, make it an
+                override (Bulk Edit → Mass Override).
               </div>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 12.5, color: t.t2, cursor: 'pointer' }}>
-                <input type="checkbox" checked={include} onChange={e => setInclude(e.target.checked)} />
-                Include them in this run
+                <input type="checkbox" checked={leave} onChange={e => setLeave(e.target.checked)} />
+                Leave them alone this run
               </label>
               <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 10 }}>
                 <tbody>

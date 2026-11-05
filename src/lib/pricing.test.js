@@ -1,4 +1,5 @@
-import { calcMSRPs, calcCostBasedMSRPs, msrpsFromBaseShelf, applyAdditionalMarkupUAE, pricesAtAdditionalMarkup, calcAllMargins } from './pricing';
+import { calcMSRPs, itemPrices, msrpsFromBaseShelf, applyAdditionalMarkupUAE, pricesAtAdditionalMarkup, calcAllMargins, calcProjectPrice } from './pricing';
+import { MARKETS } from './markets';
 import { prettifyShelf } from './shelfRounding';
 import { suggestKSAPrice, suggestKWDPrice } from './markets';
 
@@ -24,7 +25,7 @@ describe('additional markup — UAE rounds once', () => {
   });
 
   test('cost-based items work the same way', () => {
-    const p = calcCostBasedMSRPs(5427.15, 'AED', 25, rates, 5);   // 7,598.01 base target
+    const p = itemPrices({ price_used: 'cost_based', exw_cost: 5427.15, cost_currency: 'AED', target_margin_pct: 25 }, { additional: 5, rates });   // 7,598.01 base target
     expect(shelf(p.real_msrp_aed, 1.05)).toBe(7500);
     expect(shelf(p.msrp_aed, 1.05)).toBe(7900);
   });
@@ -90,5 +91,26 @@ describe('Kuwait in the shared price builders', () => {
     const item = { exw_cost: 10, cost_currency: 'AED', shipping_rate: 0, customs_duty_rate: 0, msrp_aed: 20, msrp_kwd: 2 };
     const m = calcAllMargins(item, { AED: 1, KWD: 12 });       // 2 KD = 24 AED; cost 10 → 58.3%
     expect(m.kwd_margin).toBeCloseTo((24 - 10) / 24 * 100, 6);
+  });
+});
+
+describe('one margin formula for every cost-priced price', () => {
+  const rates = { EUR: 4.4, USD: 3.6725, AED: 1 };
+  const cases = [[200, 'EUR', 5, 5.5, 25], [145, 'USD', 0, 5, 30], [1200, 'EUR', 7.5, 5.5, 20], [3999, 'AED', 0, 0, 40], [61.7, 'EUR', 3, 5.5, 45]];
+
+  test('a catalogue item on landed cost + margin is priced exactly like a project item', () => {
+    for (const [cost, cur, ship, duty, margin] of cases) {
+      const item = { price_used: 'landed_cost_based', exw_cost: cost, cost_currency: cur, shipping_rate: ship, customs_duty_rate: duty, target_margin_pct: margin };
+      const catalogue = itemPrices(item, { rates });
+      const project   = calcProjectPrice({ cost, cost_currency: cur, shipping_rate: ship, customs_duty_rate: duty, target_margin_pct: margin }, rates);
+      for (const m of MARKETS) expect(catalogue[m.price]).toBe(project[m === MARKETS[0] ? 'msrp_aed_ex_vat' : m.price]);
+    }
+  });
+
+  test('a blank margin takes its basis default: 45% on EXW cost, 40% on landed cost', () => {
+    const base = { exw_cost: 300, cost_currency: 'EUR', shipping_rate: 5, customs_duty_rate: 5.5 };
+    for (const [price_used, pct] of [['cost_based', 45], ['landed_cost_based', 40]]) {
+      expect(itemPrices({ ...base, price_used }, { rates })).toEqual(itemPrices({ ...base, price_used, target_margin_pct: pct }, { rates }));
+    }
   });
 });
