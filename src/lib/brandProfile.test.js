@@ -33,3 +33,11 @@ test('no mode when no margin repeats; nothing to show for an empty brand', () =>
   expect(brandProfile([row('A', 10), row('B', 20)], rates).exw.mode).toBeNull();
   expect(brandProfile([], rates)).toMatchObject({ count: 0, bases: [], exw: { n: 0 } });
 });
+
+test('landed margin covers cost-priced SKUs too: UAE price vs landed cost', () => {
+  const cost = row('C', 0, { price_used: 'landed_cost_based', exw_cost: 50, cost_currency: 'AED', shipping_rate: 0, customs_duty_rate: 0, msrp_aed: 100 });
+  const p = brandProfile([cost, row('A', 40, { msrp_aed: 0 })], rates);
+  expect(p.exw.n).toBe(1);                                   // only A has a vendor price
+  expect(p.landed).toMatchObject({ n: 1, missing: 1, median: 50 });   // C: 100 AED vs 50 landed; A has no UAE price
+  expect(p.landed.min).toMatchObject({ value: 50, sku: 'C', count: 1 });
+});

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useLocation } from 'react-router-dom';
 import { fetchBrandRule, fetchBrandDefaults, searchItems, fetchItem, fetchHistory, saveItem } from '../../lib/db';
 import { toNum, hasNum, round, money } from '../../lib/num';
 import { calcAllMargins, calcEmployeePrice, formatMargin, MARGIN_COLORS, itemPrices, companyBaseCosts } from '../../lib/pricing';
@@ -77,6 +78,18 @@ export default function SingleSKU({ rates, brands, editTarget, onEditTargetConsu
     onEditTargetConsumed();
     fetchHistory(editTarget.item_code).then(setHistory).catch(() => {});
   }, [editTarget]);
+
+  // A link to one item (…/single?item=CODE, from a brand profile's example
+  // SKU) opens its view card.
+  const linkedCode = new URLSearchParams(useLocation().search).get('item');
+  useEffect(() => {
+    if (!linkedCode) return;
+    fetchItem(linkedCode).then(item => {
+      setSelected(item); setQuery(item.item_code); setResults([]);
+      setShowForm(false); setEditMode(false);
+      fetchHistory(item.item_code).then(setHistory).catch(() => {});
+    }).catch(() => onToast?.(`${linkedCode} isn't in the catalogue`, false));
+  }, [linkedCode]);
 
   const handleSearch = useCallback(async(q) => {
     setQuery(q);

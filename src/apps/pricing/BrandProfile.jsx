@@ -29,9 +29,16 @@ function ShareRow({ label, count, pct }) {
   );
 }
 
-// The EXW margin figures as one grid — label · margin · SKUs · share — so every
+// An example SKU, opening its Single SKU view in a new tab so whatever is
+// being added here isn't lost.
+const SkuLink = ({ sku }) => (
+  <a href={`#/apps/pricing-master/single?item=${encodeURIComponent(sku)}`} target="_blank" rel="noopener noreferrer"
+    title={`Open ${sku} in Single SKU`} style={{ color: t.blue, textDecoration: 'none' }}>{sku}</a>
+);
+
+// One margin's figures as a grid — label · margin · SKUs · share — so every
 // column lines up. An example SKU sits on its own line under its row.
-function MarginTable({ exw }) {
+function MarginTable({ stats: exw }) {
   const cell  = { ...mono, fontSize: 12.5, textAlign: 'right', padding: '4px 0' };
   const label = { fontSize: 12.5, color: t.t3, padding: '4px 0' };
   const head  = { ...colHead, marginBottom: 2, textAlign: 'right' };
@@ -55,15 +62,40 @@ function MarginTable({ exw }) {
       {row('Mean', marginLabel(exw.mean))}
       {row('Mode', exw.mode ? marginLabel(exw.mode.value) : 'none', exw.mode, exw.mode ? null : 'no value repeats')}
       <span style={rule} />
-      {row('Min', marginLabel(exw.min.value), exw.min, `e.g. ${exw.min.sku}`)}
-      {row('Max', marginLabel(exw.max.value), exw.max, `e.g. ${exw.max.sku}`)}
+      {row('Min', marginLabel(exw.min.value), exw.min, <>e.g. <SkuLink sku={exw.min.sku} /></>)}
+      {row('Max', marginLabel(exw.max.value), exw.max, <>e.g. <SkuLink sku={exw.max.sku} /></>)}
+    </div>
+  );
+}
+
+// One margin across the brand: its figures, or why there are none, and how
+// many SKUs it leaves out.
+function MarginSection({ title, basis, stats, none, why }) {
+  return (
+    <div>
+      {/* The basis on its own line, so both margin tables start at the same height. */}
+      <div style={{ ...colHead, marginBottom: 0 }}>{title}</div>
+      <div style={{ ...colHead, textTransform: 'none', letterSpacing: 0 }}>{basis}</div>
+      {stats.n === 0 ? (
+        <div style={{ fontSize: 12.5, color: t.t4 }}>{none}</div>
+      ) : (
+        <>
+          <MarginTable stats={stats} />
+          {stats.missing > 0 && (
+            <div style={{ fontSize: 11.5, color: t.t4, marginTop: 8 }}>
+              From {stats.n.toLocaleString()} SKU{stats.n === 1 ? '' : 's'}; {stats.missing.toLocaleString()} {stats.missing === 1 ? 'has' : 'have'} none ({why}).
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
 /**
  * How a brand's catalogue is set up today, shown while adding items to it:
- * SKU count, price bases, currencies and the spread of EXW margins. Fetches its
+ * SKU count, price bases, currencies, and the spread of EXW and landed margins
+ * — four sections, two by two where the page is narrow. Fetches its
  * own rows (and rates, when the screen hasn't loaded them).
  */
 export default function BrandProfile({ brandCode, rates: givenRates }) {
@@ -95,7 +127,7 @@ export default function BrandProfile({ brandCode, rates: givenRates }) {
       {p && p.count === 0 && <div style={{ fontSize: 12.5, color: t.t4, marginTop: 6 }}>No SKUs yet — this will be the brand's first.</div>}
 
       {p?.count > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 24 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 24 }}>
           <div>
             <div style={colHead}>Price basis</div>
             {p.bases.map(b => <ShareRow key={b.label} {...b} />)}
@@ -112,21 +144,11 @@ export default function BrandProfile({ brandCode, rates: givenRates }) {
             )}
           </div>
 
-          <div>
-            <div style={colHead}>EXW margin <span style={{ textTransform: 'none', letterSpacing: 0 }}>· basis price vs EXW cost</span></div>
-            {p.exw.n === 0 ? (
-              <div style={{ fontSize: 12.5, color: t.t4 }}>No SKU has both a basis price and an EXW cost.</div>
-            ) : (
-              <>
-                <MarginTable exw={p.exw} />
-                {p.exw.missing > 0 && (
-                  <div style={{ fontSize: 11.5, color: t.t4, marginTop: 8 }}>
-                    From {p.exw.n.toLocaleString()} SKU{p.exw.n === 1 ? '' : 's'}; {p.exw.missing.toLocaleString()} {p.exw.missing === 1 ? 'has' : 'have'} no EXW margin (cost-priced, or no cost data).
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+          <MarginSection title="EXW margin" basis="basis price vs EXW cost" stats={p.exw}
+            none="No SKU has both a basis price and an EXW cost." why="cost-priced, or no cost data" />
+
+          <MarginSection title="Landed margin" basis="UAE price vs landed cost" stats={p.landed}
+            none="No SKU has both a UAE price and an EXW cost." why="no cost data, or no UAE price" />
         </div>
       )}
     </div>

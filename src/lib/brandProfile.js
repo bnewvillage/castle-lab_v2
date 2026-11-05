@@ -2,9 +2,9 @@
 // BRAND PROFILE
 // How a brand's catalogue is set up today, for whoever adds items to it: how
 // many SKUs, which price bases and currencies they use, and the spread of their
-// EXW margins. Pure: the caller supplies the brand's rows and the rates.
+// EXW and landed margins. Pure: the caller supplies the brand's rows and the rates.
 // ─────────────────────────────────────────────────────────────
-import { calcEXWMargin } from './pricing';
+import { calcEXWMargin, calcAllMargins } from './pricing';
 import { PRICE_BASIS } from './priceBases';
 import { toNum, round } from './num';
 
@@ -24,14 +24,15 @@ function breakdown(items, valueOf, labelOf = (v) => v) {
 }
 
 /**
- * EXW margins are compared to 0.1%, the precision the app shows them at: the
- * mode, and which SKUs sit at the minimum and maximum, use that rounding.
- * An EXW cost of 0 means "no cost data", so those SKUs have no margin.
+ * The spread of one margin across the brand. Margins are compared to 0.1%, the
+ * precision the app shows them at: the mode, and which SKUs sit at the minimum
+ * and maximum, use that rounding. An EXW cost of 0 means "no cost data", so
+ * those SKUs have no margin.
  */
-function exwMargins(items, rates) {
+function marginStats(items, marginOf) {
   const rows = items
     .filter(it => toNum(it.exw_cost) > 0)
-    .map(it => ({ sku: it.item_code, margin: calcEXWMargin({ ...it, exw_cost: toNum(it.exw_cost) }, rates) }))
+    .map(it => ({ sku: it.item_code, margin: marginOf({ ...it, exw_cost: toNum(it.exw_cost) }) }))
     .filter(r => r.margin != null && Number.isFinite(r.margin))
     .map(r => ({ ...r, at: round(r.margin, 1) }));
   if (!rows.length) return { n: 0, missing: items.length };
@@ -67,6 +68,9 @@ export function brandProfile(items, rates) {
     bases:          breakdown(items, it => it.price_used, v => PRICE_BASIS[v]?.label ?? v),
     costCurrencies: breakdown(items, it => it.cost_currency),
     msrpCurrencies: breakdown(items.filter(it => PRICE_BASIS[it.price_used]?.msrp), it => it[PRICE_BASIS[it.price_used].currency]),
-    exw: exwMargins(items, rates),
+    // Vendor price vs EXW cost: none for a cost-priced SKU.
+    exw:    marginStats(items, it => calcEXWMargin(it, rates)),
+    // UAE selling price vs landed cost: every SKU with a cost and a price.
+    landed: marginStats(items, it => calcAllMargins(it, rates)?.uae_margin ?? null),
   };
 }
