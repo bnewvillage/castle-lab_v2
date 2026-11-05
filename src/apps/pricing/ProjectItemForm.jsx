@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { saveProjectItem } from '../../lib/db';
 import { calcProjectPrice, formatMargin, MARGIN_COLORS, DEFAULT_PROJECT_MARGIN_PCT, PROJECT_BRAND } from '../../lib/pricing';
-import { MARKETS, DERIVED, FLAG_COLUMNS, deriveMarket } from '../../lib/markets';
+import { MARKETS, UAE, DERIVED, FLAG_COLUMNS, deriveMarket } from '../../lib/markets';
 
 import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead } from './styles';
 import { toNum, hasNum, round, money } from '../../lib/num';
@@ -83,58 +83,13 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
 
   const itemCode = form.sku_suffix ? `${PROJECT_BRAND}-${form.sku_suffix.toUpperCase()}` : '';
 
-  // ── Auto-compute AED from cost inputs (only when not overriding UAE) ──
-  useEffect(() => {
-    if (form.uae_overridden) return;
-    const cost = toNum(form.cost);
-    if (cost == null || cost < 0 || !form.cost_currency || !rates?.[form.cost_currency]) {
-      setForm(f => ({ ...f, msrp_aed_inc_vat: '', msrp_aed_ex_vat: '' }));
-      return;
-    }
-    const result = calcProjectPrice({
-      cost,
-      cost_currency:     form.cost_currency,
-      shipping_rate:     toNum(form.shipping_rate) || 0,
-      customs_duty_rate: toNum(form.customs_duty_rate) ?? 5.5,
-      target_margin_pct: toNum(form.target_margin_pct) || DEFAULT_PROJECT_MARGIN_PCT,
-    }, rates);
-    if (result) {
-      setForm(f => ({
-        ...f,
-        msrp_aed_inc_vat: result.msrp_aed_inc_vat,
-        msrp_aed_ex_vat:  result.msrp_aed_ex_vat,
-      }));
-    }
-  }, [form.cost, form.cost_currency, form.shipping_rate, form.customs_duty_rate, form.target_margin_pct, form.uae_overridden, rates]);
-
-  // ── Auto-suggest every other market from AED ex_vat whenever it changes ──
-  useEffect(() => {
-    const exVat = toNum(form.msrp_aed_ex_vat);
-    const ok = exVat != null && exVat >= 0;
-    setForm(f => ({ ...f, ...byMarket(m => f[m.flag] ? f[m.price] : ok ? deriveMarket(m, exVat) : '') }));
-  }, [form.msrp_aed_ex_vat]);
-
-  // ── Re-suggest on override revert ─────────────────────────────
-  // Keyed on which markets are hand-set, so it fires when a flag is toggled.
-  // The suggestion effect above handles re-suggestion whenever
-  // msrp_aed_ex_vat itself changes.
-  const handSet = DERIVED.map(m => (form[m.flag] ? 1 : 0)).join('');
-  useEffect(() => {
-    const exVat = toNum(form.msrp_aed_ex_vat);
-    if (exVat == null || exVat < 0) return;
-    setForm(f => ({ ...f, ...byMarket(m => f[m.flag] ? f[m.price] : deriveMarket(m, exVat)) }));
-  }, [handSet]); // intentional: msrp_aed_ex_vat omitted — handled by suggestion effect above
-
   useEffect(() => {
     if (!existing) writeFormCache(form.cost_currency, form.shipping_rate);
   }, [form.cost_currency, form.shipping_rate]); // existing is stable for the component's lifetime
 
-  // ── Derived display values ──────────────────────────────────
-  const costVal    = toNum(form.cost);
-  const incVatVal  = toNum(form.msrp_aed_inc_vat);
-  const exVatVal   = toNum(form.msrp_aed_ex_vat);
-
-  // Landed cost always computed from cost inputs (regardless of override)
+  // ── Prices: worked out on every render, never copied into state ──
+  // The price from the cost inputs, and the landed figures (whatever is overridden).
+  const costVal      = toNum(form.cost);
   const landedResult = (costVal != null && costVal >= 0 && form.cost_currency && rates?.[form.cost_currency])
     ? calcProjectPrice({
         cost:              costVal,
@@ -144,6 +99,26 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
         target_margin_pct: toNum(form.target_margin_pct) || DEFAULT_PROJECT_MARGIN_PCT,
       }, rates)
     : null;
+
+  // What the form shows and saves: UAE from the cost unless overridden, every
+  // other market from UAE unless overridden. An override shows what was typed.
+  const shown = (() => {
+    const uae = form.uae_overridden
+      ? { msrp_aed_inc_vat: form.msrp_aed_inc_vat, msrp_aed_ex_vat: form.msrp_aed_ex_vat }
+      : { msrp_aed_inc_vat: landedResult?.msrp_aed_inc_vat ?? '', msrp_aed_ex_vat: landedResult?.msrp_aed_ex_vat ?? '' };
+    const exVat = toNum(uae.msrp_aed_ex_vat);
+    const ok    = exVat != null && exVat >= 0;
+    return { ...uae, ...byMarket(m => form[m.flag] ? form[m.price] : ok ? deriveMarket(m, exVat) : '') };
+  })();
+  const incVatVal = toNum(shown.msrp_aed_inc_vat);
+  const exVatVal  = toNum(shown.msrp_aed_ex_vat);
+
+  // Overriding starts from the price shown; reverting goes back to working it out.
+  const toggleOverride = (m) => setForm(f => f[m.flag]
+    ? { ...f, [m.flag]: false }
+    : { ...f, [m.flag]: true, ...(m === UAE
+        ? { msrp_aed_inc_vat: shown.msrp_aed_inc_vat, msrp_aed_ex_vat: shown.msrp_aed_ex_vat }
+        : { [m.price]: shown[m.price] }) });
 
   const landedAED         = landedResult?.landed_cost_aed;
   const costExCustomsSrc  = landedResult?.cost_ex_customs_src;
@@ -185,8 +160,8 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
   const handleConfirm = async () => {
     setSaving(true);
     try {
-      const incVat = toNum(form.msrp_aed_inc_vat);
-      const exVat  = toNum(form.msrp_aed_ex_vat);
+      const incVat = toNum(shown.msrp_aed_inc_vat);
+      const exVat  = toNum(shown.msrp_aed_ex_vat);
       await saveProjectItem({
         item_code:         itemCode,
         project_item_name: form.project_item_name || null,
@@ -197,7 +172,7 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
         target_margin_pct: toNum(form.target_margin_pct) || DEFAULT_PROJECT_MARGIN_PCT,
         msrp_aed_inc_vat:  toNum(incVat),
         msrp_aed_ex_vat:   toNum(exVat),
-        ...byMarket(m => toNum(form[m.price])),
+        ...byMarket(m => toNum(shown[m.price])),
         ...byFlag(c => form[c]),
       }, { isNew: !existing });
       setModal(null);
@@ -375,7 +350,7 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
         <div style={{ ...groupBox(false), background:t.bg1 }}>
           <div style={{ ...groupHead, marginBottom:20 }}>Live summary</div>
 
-          {!hasVal(form.msrp_aed_inc_vat) && !landedResult ? (
+          {!hasVal(shown.msrp_aed_inc_vat) && !landedResult ? (
             <div style={{ color:t.t4, fontSize:13, textAlign:'center', padding:'24px 0' }}>
               Fill in cost data to see calculations.
             </div>
@@ -386,7 +361,7 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
                 <div style={{ background:t.bg2, padding:'14px', gridColumn:'1 / -1' }}>
                   <div style={{ fontSize:10, color:t.t4, textTransform:'uppercase', letterSpacing:'0.06em', fontFamily:'var(--font-mono)', marginBottom:5 }}>UAE (inc VAT)</div>
                   <div style={{ fontSize:20, fontWeight:500, color:t.t1, marginBottom:3 }}>
-                    {hasVal(form.msrp_aed_inc_vat) ? `AED ${Number(incVatVal).toLocaleString()}` : '—'}
+                    {hasVal(shown.msrp_aed_inc_vat) ? `AED ${Number(incVatVal).toLocaleString()}` : '—'}
                   </div>
                   <div style={{ fontSize:11, color:MARGIN_COLORS[marginFmt.status] }}>↑ {marginFmt.label} margin</div>
                 </div>
@@ -395,8 +370,8 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
                     <div style={{ fontSize:10, color:t.t4, textTransform:'uppercase', letterSpacing:'0.06em', fontFamily:'var(--font-mono)', marginBottom:5 }}>
                       {m.short}{form[m.flag] && <span style={{ color:t.amber, marginLeft:4 }}>↑</span>}
                     </div>
-                    <div style={{ fontSize:15, fontWeight:500, color: hasVal(form[m.price]) ? t.t1 : t.t4, marginBottom:3, whiteSpace:'nowrap' }}>
-                      {hasVal(form[m.price]) ? money(form[m.price], m.currency, m.dp) : '—'}
+                    <div style={{ fontSize:15, fontWeight:500, color: hasVal(shown[m.price]) ? t.t1 : t.t4, marginBottom:3, whiteSpace:'nowrap' }}>
+                      {hasVal(shown[m.price]) ? money(shown[m.price], m.currency, m.dp) : '—'}
                     </div>
                   </div>
                 ))}
@@ -440,14 +415,14 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
                   type="text" inputMode="decimal"
                   placeholder="Auto-calculated"
                   readOnly={!form.uae_overridden}
-                  value={form.msrp_aed_inc_vat ?? ''}
+                  value={shown.msrp_aed_inc_vat ?? ''}
                   style={{
-                    ...inp(hasVal(form.msrp_aed_inc_vat), false),
+                    ...inp(hasVal(shown.msrp_aed_inc_vat), false),
                     flex:1,
                     color: form.uae_overridden ? t.t1 : t.t2,
                     borderColor: form.uae_overridden
                       ? 'rgba(245,166,35,0.4)'
-                      : hasVal(form.msrp_aed_inc_vat) ? 'rgba(62,207,142,0.4)' : t.b2,
+                      : hasVal(shown.msrp_aed_inc_vat) ? 'rgba(62,207,142,0.4)' : t.b2,
                   }}
                   onChange={e => {
                     const raw = e.target.value;
@@ -461,11 +436,11 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
                 />
                 <button
                   style={{ ...btnG, ...btnSm, color: form.uae_overridden ? t.amber : t.t4 }}
-                  onClick={() => set('uae_overridden', !form.uae_overridden)}
+                  onClick={() => toggleOverride(UAE)}
                 >{form.uae_overridden ? 'Revert' : 'Override'}</button>
               </div>
               <span style={sub}>{toNum(form.target_margin_pct) || DEFAULT_PROJECT_MARGIN_PCT}% margin on landed cost · override to set manually</span>
-              {hasVal(form.msrp_aed_ex_vat) && (
+              {hasVal(shown.msrp_aed_ex_vat) && (
                 <span style={{ ...sub, color:t.t3, marginTop:4 }}>Ex VAT: AED {exVatVal.toFixed(2)}</span>
               )}
             </div>
@@ -483,20 +458,20 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
                     type="text" inputMode="decimal"
                     placeholder="Auto-calculated"
                     readOnly={!form[m.flag]}
-                    value={form[m.price] ?? ''}
+                    value={shown[m.price] ?? ''}
                     style={{
-                      ...inp(hasVal(form[m.price]), false),
+                      ...inp(hasVal(shown[m.price]), false),
                       flex:1,
                       color: form[m.flag] ? t.t1 : t.t2,
                       borderColor: form[m.flag]
                         ? 'rgba(245,166,35,0.4)'
-                        : hasVal(form[m.price]) ? 'rgba(62,207,142,0.4)' : t.b2,
+                        : hasVal(shown[m.price]) ? 'rgba(62,207,142,0.4)' : t.b2,
                     }}
                     onChange={e => set(m.price, e.target.value)}
                   />
                   <button
                     style={{ ...btnG, ...btnSm, color: form[m.flag] ? t.amber : t.t4 }}
-                    onClick={() => set(m.flag, !form[m.flag])}
+                    onClick={() => toggleOverride(m)}
                   >{form[m.flag] ? 'Revert' : 'Override'}</button>
                 </div>
                 <span style={sub}>{m.rule}{m.vat > 1 ? ` · result is ${m.currency} ex-VAT` : ''}</span>
@@ -547,9 +522,9 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
               ['Customs duty',     `${toNum(form.customs_duty_rate) ?? 5.5}%`],
               ['Target margin',    `${toNum(form.target_margin_pct) || DEFAULT_PROJECT_MARGIN_PCT}%`],
               ['Landed cost',      money(landedAED, 'AED', 2)],
-              ['UAE inc VAT',  hasVal(form.msrp_aed_inc_vat) ? `AED ${incVatVal.toLocaleString()}` : '—'],
-              ['UAE ex VAT',   hasVal(form.msrp_aed_ex_vat)  ? `AED ${exVatVal.toFixed(2)}`       : '—'],
-              ...DERIVED.map(m => [`${m.short} (${m.currency})`, hasVal(form[m.price]) ? money(form[m.price], m.currency, m.dp) : '—']),
+              ['UAE inc VAT',  hasVal(shown.msrp_aed_inc_vat) ? `AED ${incVatVal.toLocaleString()}` : '—'],
+              ['UAE ex VAT',   hasVal(shown.msrp_aed_ex_vat)  ? `AED ${exVatVal.toFixed(2)}`       : '—'],
+              ...DERIVED.map(m => [`${m.short} (${m.currency})`, hasVal(shown[m.price]) ? money(shown[m.price], m.currency, m.dp) : '—']),
               ['Gross margin', marginFmt.label],
               ...MARKETS.filter(m => form[m.flag]).map(m => [`${m.short} override`, 'Yes — manual price']),
             ].map(([label, value]) => (

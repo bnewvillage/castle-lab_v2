@@ -4,23 +4,39 @@ import { fetchBrandRule, fetchBrandDefaults, searchItems, fetchItem, fetchHistor
 import { toNum, hasNum, round, money } from '../../lib/num';
 import { calcAllMargins, calcEmployeePrice, formatMargin, MARGIN_COLORS, itemPrices } from '../../lib/pricing';
 import { PRICE_BASES, PRICE_BASIS, isCostPriced, basisNeeds, basisPrice, targetMargin } from '../../lib/priceBases';
-import { MARKETS, DERIVED, PRICE_COLUMNS, REAL_COLUMNS, FLAG_COLUMNS, deriveMarkets } from '../../lib/markets';
+import { MARKETS, UAE, DERIVED, PRICE_COLUMNS, REAL_COLUMNS, FLAG_COLUMNS, deriveMarkets } from '../../lib/markets';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead, segDiv, CURRENCIES, SOURCES } from './styles';
 import BrandSelect from './BrandSelect';
 import { useAuth } from '../../lib/AuthContext';
 import { downloadXLSX } from '../../lib/xlsxExport';
 
 /**
- * Every market's prices implied by the current form, or null when there is not
- * enough input yet. Both pricing bases go through here, so a cost-based row and
- * an MSRP-based row can never drift apart — they previously lived in two
- * copy-pasted effects that already disagreed on how KSA was derived.
+ * Every market's prices implied by the current form's source, or null when
+ * there is not enough input yet.
  */
 function derivePrices(form, { markup, additionalMarkup, rates }) {
   if (!form.price_used) return null;
   // An MSRP basis waits for the brand's markup to load.
   if (!isCostPriced(form.price_used) && markup == null) return null;
   return itemPrices(form, { markup, additional: additionalMarkup, rates });
+}
+
+/**
+ * The prices the form shows and saves, worked out on every render — never
+ * copied into state, so nothing can fall out of step with its inputs.
+ * UAE comes from the source unless overridden, every other market from UAE
+ * unless overridden, and an override shows what was typed. Without enough
+ * input yet, a price shows what the form holds (an existing item's stored one).
+ */
+function shownPrices(form, derived) {
+  const aed = form.uae_overridden || !derived ? form.msrp_aed : derived.msrp_aed;
+  const uae = toNum(aed);
+  const held = (columns) => Object.fromEntries(columns.map(c => [c, form[c]]));
+  return {
+    msrp_aed: aed,
+    ...(uae ? deriveMarkets(uae, { keep: form }) : held(DERIVED.map(m => m.price))),
+    ...(derived ? Object.fromEntries(REAL_COLUMNS.map(c => [c, derived[c]])) : held(REAL_COLUMNS)),
+  };
 }
 
 // ── ROOT ──────────────────────────────────────────────────────
@@ -257,16 +273,6 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
 
   const set = (key,val) => setForm(f=>({...f,[key]:val}));
 
-  // Recalc every other market when UAE changes, or when a market's override
-  // is reverted (handSet: which markets are hand-set).
-  const handSet = DERIVED.map(m => (form[m.flag] ? 1 : 0)).join('');
-  useEffect(() => {
-    if (viewMode) return;
-    const uae = toNum(form.msrp_aed);
-    if (!uae) return;
-    setForm(f => ({ ...f, ...deriveMarkets(uae, { keep: f }) }));
-  }, [form.msrp_aed, viewMode, handSet]);
-
   // Load markup + hints
   useEffect(() => {
     if (!form.brand_code) { setMarkup(null); setAdditionalMarkup(null); setHint(null); setPriceHint(null); return; }
@@ -280,25 +286,15 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
     }).catch(() => { setHint(null); setPriceHint(null); });
   }, [form.brand_code]);
 
-  // Auto-suggest prices. Reverting a market override is just another input
-  // change, so it re-runs this same derivation rather than a parallel copy.
-  useEffect(() => {
-    if (viewMode) return;
-    const msrps = derivePrices(form, { markup, additionalMarkup, rates });
-    if (!msrps) return;
-    setForm(f => {
-      const aed = f.uae_overridden ? f.msrp_aed : msrps.msrp_aed;
-      return {
-        ...f,
-        msrp_aed: aed,
-        ...deriveMarkets(aed, { keep: f }),
-        ...Object.fromEntries(REAL_COLUMNS.map(c => [c, msrps[c]])),
-      };
-    });
-  }, [form.price_used,form.msrp_primary_ex_vat,form.msrp_primary_inc_vat,form.msrp_primary_currency,
-      form.msrp_secondary_ex_vat,form.msrp_secondary_inc_vat,form.msrp_secondary_currency,
-      form.exw_cost,form.cost_currency,form.target_margin_pct,form.shipping_rate,form.customs_duty_rate,
-      form.uae_overridden,markup,additionalMarkup,viewMode]);
+  // View mode shows what is stored; editing shows what the inputs give.
+  const prices = viewMode
+    ? Object.fromEntries([...PRICE_COLUMNS, ...REAL_COLUMNS].map(c => [c, form[c]]))
+    : shownPrices(form, derivePrices(form, { markup, additionalMarkup, rates }));
+
+  // Overriding starts from the price shown; reverting goes back to working it out.
+  const toggleOverride = (m) => setForm(f => f[m.flag]
+    ? { ...f, [m.flag]: false }
+    : { ...f, [m.flag]: true, [m.price]: prices[m.price] });
 
   const hasVal = hasNum;
   const availableBases = PRICE_BASES.filter(b => hasVal(form[basisNeeds(b)]));
@@ -308,6 +304,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
 
   const asItem = () => ({
     ...form,
+    ...prices,
     item_code:              itemCode,
     barcode:                form.barcode||null,
     exw_cost:               form.exw_cost!==''?toNum(form.exw_cost)||0:null,
@@ -317,7 +314,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
     msrp_primary_inc_vat:   hasVal(form.msrp_primary_inc_vat)?toNum(form.msrp_primary_inc_vat):null,
     msrp_secondary_ex_vat:  hasVal(form.msrp_secondary_ex_vat)?toNum(form.msrp_secondary_ex_vat):null,
     msrp_secondary_inc_vat: hasVal(form.msrp_secondary_inc_vat)?toNum(form.msrp_secondary_inc_vat):null,
-    ...Object.fromEntries([...PRICE_COLUMNS, ...REAL_COLUMNS].map(c => [c, toNum(form[c])])),
+    ...Object.fromEntries([...PRICE_COLUMNS, ...REAL_COLUMNS].map(c => [c, toNum(prices[c])])),
     target_margin_pct:      isCostPriced(form.price_used) ? targetMargin(form) : null,
   });
 
@@ -364,7 +361,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
         && !(toNum(form.target_margin_pct) > 0 && toNum(form.target_margin_pct) < 100)) { fe.target_margin_pct=true; ge.priceData=true; }
     if (hasSec&&!form.msrp_secondary_currency) { fe.msrp_secondary_currency=true; ge.priceData=true; }
     if (hasPri&&!form.price_used) { fe.price_used=true; ge.priceData=true; }
-    if (!hasVal(form.msrp_aed))   { fe.msrp_aed=true; ge.priceData=true; }
+    if (!hasVal(prices.msrp_aed)) { fe.msrp_aed=true; ge.priceData=true; }
     if (!form.price_source)       { fe.price_source=true; ge.priceData=true; }
     if (!form.cost_source)        { fe.cost_source=true; ge.costData=true; }
     return {fe,ge};
@@ -591,14 +588,14 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
             <div style={fg}>
               <label style={lbl}>UAE — Ex VAT (AED) <span style={{color:form.uae_overridden?t.amber:t.green}}>{form.uae_overridden?'overridden':'suggested'}</span></label>
               <div style={{display:'flex',gap:8}}>
-                <input {...I('msrp_aed',fieldErrs.msrp_aed)} type="text" inputMode="decimal"
+                <input {...I('msrp_aed',fieldErrs.msrp_aed)} value={prices.msrp_aed??''} type="text" inputMode="decimal"
                   placeholder="Auto-calculated" readOnly={!form.uae_overridden}
-                  style={{...inp(hasVal(form.msrp_aed),fieldErrs.msrp_aed),flex:1,
+                  style={{...inp(hasVal(prices.msrp_aed),fieldErrs.msrp_aed),flex:1,
                     color:form.uae_overridden?t.t1:t.t2,
-                    borderColor:form.uae_overridden?'rgba(245,166,35,0.4)':hasVal(form.msrp_aed)?'rgba(62,207,142,0.4)':fieldErrs.msrp_aed?'rgba(242,100,100,0.6)':t.b2}}
+                    borderColor:form.uae_overridden?'rgba(245,166,35,0.4)':hasVal(prices.msrp_aed)?'rgba(62,207,142,0.4)':fieldErrs.msrp_aed?'rgba(242,100,100,0.6)':t.b2}}
                 />
                 <button style={{...btnG,...btnSm,color:form.uae_overridden?t.amber:t.t4}}
-                  onClick={()=>set('uae_overridden',!form.uae_overridden)}>
+                  onClick={()=>toggleOverride(UAE)}>
                   {form.uae_overridden?'Revert':'Override'}
                 </button>
               </div>
@@ -608,10 +605,10 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
               <div key={m.key} style={fg}>
                 <label style={lbl}>{m.short} ({m.currency}) <span style={{color:form[m.flag]?t.amber:t.t4}}>{form[m.flag]?'overridden':'auto-suggested'}</span></label>
                 <div style={{display:'flex',gap:8}}>
-                  <input {...I(m.price)} type="text" inputMode="decimal" readOnly={!form[m.flag]}
-                    style={{...inp(hasVal(form[m.price]),false),flex:1,color:form[m.flag]?t.t1:t.t3,borderColor:form[m.flag]?'rgba(245,166,35,0.4)':t.b2}}
+                  <input {...I(m.price)} value={prices[m.price]??''} type="text" inputMode="decimal" readOnly={!form[m.flag]}
+                    style={{...inp(hasVal(prices[m.price]),false),flex:1,color:form[m.flag]?t.t1:t.t3,borderColor:form[m.flag]?'rgba(245,166,35,0.4)':t.b2}}
                   />
-                  <button style={{...btnG,...btnSm,color:form[m.flag]?t.amber:t.t4}} onClick={()=>set(m.flag,!form[m.flag])}>
+                  <button style={{...btnG,...btnSm,color:form[m.flag]?t.amber:t.t4}} onClick={()=>toggleOverride(m)}>
                     {form[m.flag]?'Revert':'Override'}
                   </button>
                 </div>
