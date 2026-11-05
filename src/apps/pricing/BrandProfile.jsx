@@ -6,31 +6,57 @@ import { t, groupBox, groupHead } from './styles';
 // A share to one decimal, dropped when whole: 75%, 12.5%.
 const pctLabel = (v) => { const r = Math.round(v * 10) / 10; return `${r % 1 ? r.toFixed(1) : r}%`; };
 const marginLabel = (v) => (v == null ? '—' : `${v.toFixed(1)}%`);
-const mono = { fontFamily: 'var(--font-mono)' };
+const mono = { fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums' };
 const colHead = { fontSize: 10.5, color: t.t4, textTransform: 'uppercase', letterSpacing: '0.07em', ...mono, marginBottom: 8 };
+
+// Count and share sit in fixed-width columns so they line up row to row.
+const countCol = { ...mono, minWidth: 48, textAlign: 'right', color: t.t3 };
+const shareCol = { ...mono, minWidth: 52, textAlign: 'right', color: t.t3 };
 
 // One distinct value: its label, count and share, with a bar for the share.
 function ShareRow({ label, count, pct }) {
   return (
-    <div style={{ marginBottom: 7 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12.5 }}>
-        <span style={{ color: t.t2 }}>{label}</span>
-        <span style={{ color: t.t3, ...mono, whiteSpace: 'nowrap' }}>{count.toLocaleString()} · {pctLabel(pct)}</span>
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, fontSize: 12.5 }}>
+        <span style={{ color: t.t2, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+        <span style={countCol}>{count.toLocaleString()}</span>
+        <span style={shareCol}>{pctLabel(pct)}</span>
       </div>
-      <div style={{ height: 3, background: t.b1, borderRadius: 2, marginTop: 3 }}>
+      <div style={{ height: 3, background: t.b1, borderRadius: 2, marginTop: 4 }}>
         <div style={{ width: `${pct}%`, height: '100%', background: t.blue, borderRadius: 2, opacity: 0.7 }} />
       </div>
     </div>
   );
 }
 
-function Stat({ label, value, note }) {
+// The EXW margin figures as one grid — label · margin · SKUs · share — so every
+// column lines up. An example SKU sits on its own line under its row.
+function MarginTable({ exw }) {
+  const cell  = { ...mono, fontSize: 12.5, textAlign: 'right', padding: '4px 0' };
+  const label = { fontSize: 12.5, color: t.t3, padding: '4px 0' };
+  const head  = { ...colHead, marginBottom: 2, textAlign: 'right' };
+  const note  = { ...mono, gridColumn: '1 / -1', fontSize: 11.5, color: t.t4, textAlign: 'right', marginTop: -2, paddingBottom: 4 };
+  const rule  = { gridColumn: '1 / -1', height: 1, background: t.b1, margin: '6px 0' };
+  const skus  = (n) => n.toLocaleString();
+  const row = (name, margin, x, sub) => [
+    <span key={name + 'l'} style={label}>{name}</span>,
+    <span key={name + 'm'} style={{ ...cell, color: t.t1, fontWeight: 500 }}>{margin}</span>,
+    <span key={name + 'c'} style={{ ...cell, color: t.t3 }}>{x ? skus(x.count) : ''}</span>,
+    <span key={name + 'p'} style={{ ...cell, color: t.t3 }}>{x ? pctLabel(x.pct) : ''}</span>,
+    sub && <span key={name + 's'} style={note}>{sub}</span>,
+  ];
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12.5, padding: '3px 0' }}>
-      <span style={{ color: t.t3 }}>{label}</span>
-      <span style={{ color: t.t1, ...mono, textAlign: 'right' }}>
-        {value}{note && <span style={{ color: t.t4 }}> · {note}</span>}
-      </span>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto', columnGap: 18, alignItems: 'baseline' }}>
+      <span />
+      <span style={head}>margin</span>
+      <span style={head}>SKUs</span>
+      <span style={head}>share</span>
+      {row('Median', marginLabel(exw.median))}
+      {row('Mean', marginLabel(exw.mean))}
+      {row('Mode', exw.mode ? marginLabel(exw.mode.value) : 'none', exw.mode, exw.mode ? null : 'no value repeats')}
+      <span style={rule} />
+      {row('Min', marginLabel(exw.min.value), exw.min, `e.g. ${exw.min.sku}`)}
+      {row('Max', marginLabel(exw.max.value), exw.max, `e.g. ${exw.max.sku}`)}
     </div>
   );
 }
@@ -92,19 +118,9 @@ export default function BrandProfile({ brandCode, rates: givenRates }) {
               <div style={{ fontSize: 12.5, color: t.t4 }}>No SKU has both a basis price and an EXW cost.</div>
             ) : (
               <>
-                <Stat label="Median" value={marginLabel(p.exw.median)} />
-                <Stat label="Mean"   value={marginLabel(p.exw.mean)} />
-                <Stat label="Mode"   value={p.exw.mode ? marginLabel(p.exw.mode.value) : 'none'}
-                  note={p.exw.mode ? `${p.exw.mode.count.toLocaleString()} SKUs · ${pctLabel(p.exw.mode.pct)}` : 'no value repeats'} />
-                <div style={{ height: 1, background: t.b1, margin: '7px 0' }} />
-                {[['Min', p.exw.min], ['Max', p.exw.max]].map(([label, x]) => (
-                  <div key={label} style={{ padding: '3px 0' }}>
-                    <Stat label={label} value={marginLabel(x.value)} note={`${x.count.toLocaleString()} SKU${x.count === 1 ? '' : 's'} · ${pctLabel(x.pct)}`} />
-                    <div style={{ fontSize: 11.5, color: t.t4, ...mono, textAlign: 'right' }}>e.g. {x.sku}</div>
-                  </div>
-                ))}
+                <MarginTable exw={p.exw} />
                 {p.exw.missing > 0 && (
-                  <div style={{ fontSize: 11.5, color: t.t4, marginTop: 6 }}>
+                  <div style={{ fontSize: 11.5, color: t.t4, marginTop: 8 }}>
                     From {p.exw.n.toLocaleString()} SKU{p.exw.n === 1 ? '' : 's'}; {p.exw.missing.toLocaleString()} {p.exw.missing === 1 ? 'has' : 'have'} no EXW margin (cost-priced, or no cost data).
                   </div>
                 )}
