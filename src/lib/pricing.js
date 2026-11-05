@@ -188,6 +188,26 @@ export function pricesAtAdditionalMarkup(item, additionalPct, { markup, rates })
   return { msrp_aed, ...deriveMarkets(msrp_aed), fromSource };
 }
 
+// ── COMPANY BASE COST ─────────────────────────────────────────
+
+/**
+ * An item's company base cost — what one of the group's companies bills another
+ * for it — in every market's currency: the EXW cost converted to AED at the
+ * stored rate, then into each market's currency at its stored rate. No
+ * shipping, customs or markup. Kept to 2 decimals, as the ERP stores them;
+ * null without an EXW cost (0 means no cost data). Stored like the prices and
+ * worked out again whenever the cost or currency is saved.
+ */
+export function companyBaseCosts(item, rates) {
+  const exw   = toNum(item.exw_cost);
+  const toAED = rates?.[item.cost_currency];
+  const aed   = exw > 0 && toAED ? exw * toAED : null;
+  return Object.fromEntries(MARKETS.map(m => {
+    const rate = m.rate ? (rates?.[m.rate.currency] || m.rate.fallback) : 1;
+    return [m.baseCost, aed == null ? null : round(aed / rate, 2)];
+  }));
+}
+
 // ── EMPLOYEE PRICE ────────────────────────────────────────────
 
 export function calcEmployeePrice(item, rates) {

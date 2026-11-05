@@ -2,9 +2,12 @@ import { useState, useEffect } from 'react';
 import { toNum } from '../../lib/num';
 import * as XLSX from 'xlsx-js-style';
 import { fetchBrands, fetchRates, fetchItemsByCodes, bulkUpdateItemFields } from '../../lib/db';
-import { itemPrices } from '../../lib/pricing';
+import { itemPrices, companyBaseCosts } from '../../lib/pricing';
 import { PRICE_BASIS, PASTE_BASIS_VALUES, isCostPriced, targetMargin } from '../../lib/priceBases';
 import { MARKETS } from '../../lib/markets';
+
+// The fields a company base cost is worked out from.
+const BASE_COST_INPUTS = new Set(['exw_cost', 'cost_currency']);
 import { t, inp, sel, btnW, btnG, lbl, groupBox, groupHead, CURRENCIES } from './styles';
 import BrandSelect from './BrandSelect';
 
@@ -42,7 +45,7 @@ const PRICE_COLS = MARKETS.map(m => ({ k: m.price, label: `${m.short} price`, fl
 const repricedBy = (field, merged) =>
   field === 'price_used' || !!PRICE_BASIS[merged.price_used]?.inputs.includes(field);
 const ALL_FIELDS = [...ROW_FIELDS, ...OPT_FIELDS];
-const LABELS = Object.fromEntries([...ALL_FIELDS, ...PRICE_COLS].map(f => [f.k, f.label]));
+const LABELS = Object.fromEntries([...ALL_FIELDS, ...PRICE_COLS, ...MARKETS.map(m => ({ k: m.baseCost, label: `${m.short} base cost` }))].map(f => [f.k, f.label]));
 const isNumField = (k) => !!ALL_FIELDS.find(f => f.k === k)?.num;
 
 const box = {
@@ -190,6 +193,15 @@ export default function BulkUpdatePaste({ onToast, isViewer }) {
         // A cost-priced item keeps the margin it was priced at (docs/adr/0001).
         if (prices && isCostPriced(merged.price_used) && toNum(merged.target_margin_pct) == null) {
           diffs.push({ field:'target_margin_pct', from:row.target_margin_pct ?? null, to:targetMargin(merged), computed:true });
+        }
+
+        if (diffs.some(d => BASE_COST_INPUTS.has(d.field))) {
+          const costs = companyBaseCosts(merged, rates);
+          for (const m of MARKETS) {
+            if (!sameValue(row[m.baseCost], costs[m.baseCost], true)) {
+              diffs.push({ field:m.baseCost, from:row[m.baseCost] ?? null, to:costs[m.baseCost], computed:true });
+            }
+          }
         }
 
         if (diffs.length) changed.push({ item_code: row.item_code, sku, diffs });

@@ -7,7 +7,8 @@
 // naming markets one by one. A new market is one entry here (plus its columns
 // in the database).
 //
-//   key        column suffix: msrp_<key>, real_msrp_<key>, old/new_msrp_<key>
+//   key        column suffix: msrp_<key>, real_msrp_<key>, old/new_msrp_<key>,
+//              base_cost_<key>
 //   code       override flag and margin prefix: <code>_overridden, <code>_margin
 //   short      the label on screens (UAE / KSA / QAT / KWT)
 //   vat        the shelf price is stored ÷ this (1 = no VAT)
@@ -44,6 +45,7 @@ const market = (m) => ({
   real:  `real_msrp_${m.key}`,
   flag:  `${m.code}_overridden`,
   margin: `${m.code}_margin`,
+  baseCost: `base_cost_${m.key}`,
 });
 
 export const MARKETS = [
@@ -71,6 +73,7 @@ export const PRICE_COLUMNS   = MARKETS.map(m => m.price);
 export const REAL_COLUMNS    = MARKETS.map(m => m.real);
 export const FLAG_COLUMNS    = MARKETS.map(m => m.flag);
 export const HISTORY_COLUMNS = MARKETS.flatMap(m => [`old_${m.price}`, `new_${m.price}`]);
+export const BASE_COST_COLUMNS = MARKETS.map(m => m.baseCost);
 
 /** A derived market's stored price from a UAE price ex-VAT, at its decimals. */
 export const deriveMarket = (m, aedExVat) => (aedExVat == null ? null : round(m.derive(aedExVat), m.dp));

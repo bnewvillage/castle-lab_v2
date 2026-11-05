@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { BRAND_DEFAULT_FIELDS, brandDefaultsFrom } from './pricing';
-import { itemRow, projectItemRow, PRICES_SELECT, FLAGS_SELECT, ALL_PRICES_SELECT, HISTORY_SELECT } from './rows';
+import { itemRow, projectItemRow, PRICES_SELECT, FLAGS_SELECT, ALL_PRICES_SELECT, HISTORY_SELECT, BASE_COST_SELECT } from './rows';
 import { orExpression } from './search';
 
 // ── INTERNAL HELPERS ──────────────────────────────────────────
@@ -183,7 +183,7 @@ export async function fetchItemsByCodes(itemCodes) {
   const results = [];
   for (const batch of chunkArray(codes, CHUNK)) {
     const { data, error } = await supabase.from('pricing_master')
-      .select(`item_code, brand_code, item_name, barcode, exw_cost, cost_currency, shipping_rate, customs_duty_rate, msrp_primary_ex_vat, msrp_primary_inc_vat, msrp_primary_currency, msrp_secondary_ex_vat, msrp_secondary_inc_vat, msrp_secondary_currency, price_used, target_margin_pct, cost_source, price_source, ${ALL_PRICES_SELECT}`)
+      .select(`item_code, brand_code, item_name, barcode, exw_cost, cost_currency, shipping_rate, customs_duty_rate, msrp_primary_ex_vat, msrp_primary_inc_vat, msrp_primary_currency, msrp_secondary_ex_vat, msrp_secondary_inc_vat, msrp_secondary_currency, price_used, target_margin_pct, cost_source, price_source, ${ALL_PRICES_SELECT}, ${BASE_COST_SELECT}`)
       .in('item_code', batch);
     if (error) throw error;
     results.push(...data);
@@ -648,7 +648,6 @@ export async function renameItemCodes(pairs) {
 }
 
 // ── CATALOGUE-WIDE PRICE CHANGES ──────────────────────────────
-
 // Reads the whole catalogue with keyset pagination: each page seeks past the
 // last code seen instead of OFFSET-scanning everything before it. Stops only on
 // an empty page, so a server max_rows cap below the requested size cannot
@@ -657,7 +656,7 @@ export async function fetchAllItemPrices() {
   const all = [];
   let after = null;
   for (;;) {
-    let q = supabase.from('pricing_master').select(`item_code, item_name, brand_code, ${ALL_PRICES_SELECT}`).order('item_code').limit(1000);
+    let q = supabase.from('pricing_master').select(`item_code, item_name, brand_code, exw_cost, cost_currency, ${ALL_PRICES_SELECT}, ${BASE_COST_SELECT}`).order('item_code').limit(1000);
     if (after != null) q = q.gt('item_code', after);
     const { data, error } = await q;
     if (error) throw error;

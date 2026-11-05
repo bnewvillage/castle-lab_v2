@@ -5,7 +5,7 @@
 // come from markets.js. The caller adds its own updated_at / updated_by.
 // ─────────────────────────────────────────────────────────────
 import { toNum } from './num';
-import { MARKETS, UAE, DERIVED, PRICE_COLUMNS, REAL_COLUMNS, FLAG_COLUMNS, HISTORY_COLUMNS } from './markets';
+import { MARKETS, UAE, DERIVED, PRICE_COLUMNS, REAL_COLUMNS, FLAG_COLUMNS, HISTORY_COLUMNS, BASE_COST_COLUMNS } from './markets';
 import { PROJECT_BRAND } from './pricing';
 import { isCostPriced, targetMargin } from './priceBases';
 
@@ -32,7 +32,7 @@ export function itemRow(item) {
     // A cost-priced item keeps the margin it was priced at (docs/adr/0001).
     target_margin_pct:        isCostPriced(item.price_used) ? targetMargin(item) : toNum(item.target_margin_pct),
     price_source:             item.price_source || null,
-    ...numbers(item, [...PRICE_COLUMNS, ...REAL_COLUMNS]),
+    ...numbers(item, [...PRICE_COLUMNS, ...REAL_COLUMNS, ...BASE_COST_COLUMNS]),
     ...flags(item),
     cost_source:              item.cost_source || null,
   };
@@ -71,4 +71,5 @@ export const PRICES_SELECT      = PRICE_COLUMNS.join(', ');
 export const FLAGS_SELECT       = FLAG_COLUMNS.join(', ');
 export const ALL_PRICES_SELECT  = [...PRICE_COLUMNS, ...REAL_COLUMNS, ...FLAG_COLUMNS].join(', ');
 export const HISTORY_SELECT     = HISTORY_COLUMNS.join(', ');
+export const BASE_COST_SELECT   = BASE_COST_COLUMNS.join(', ');
 

@@ -51,6 +51,7 @@ export const NAV = [
     items: [
       { label: 'Price Lists',      icon: IconFileExport, path: '/apps/others/erp-export' },
       { label: 'Catalogue Checks', icon: IconCheckList,  path: '/apps/others/erp-checks' },
+      { label: 'Company Base Cost', icon: IconTag,       path: '/apps/others/base-cost' },
       { label: 'Purchase Order',   icon: IconCart,       path: '/apps/others/purchase-order' },
     ],
   },

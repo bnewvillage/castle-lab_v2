@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchBrandRule, fetchBrandDefaults, searchItems, fetchItem, fetchHistory, saveItem } from '../../lib/db';
 import { toNum, hasNum, round, money } from '../../lib/num';
-import { calcAllMargins, calcEmployeePrice, formatMargin, MARGIN_COLORS, itemPrices } from '../../lib/pricing';
+import { calcAllMargins, calcEmployeePrice, formatMargin, MARGIN_COLORS, itemPrices, companyBaseCosts } from '../../lib/pricing';
 import { PRICE_BASES, PRICE_BASIS, isCostPriced, basisNeeds, basisPrice, targetMargin } from '../../lib/priceBases';
 import { MARKETS, UAE, DERIVED, PRICE_COLUMNS, REAL_COLUMNS, FLAG_COLUMNS, deriveMarkets } from '../../lib/markets';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead, segDiv, CURRENCIES, SOURCES } from './styles';
@@ -303,7 +303,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
   const basis          = PRICE_BASIS[form.price_used];
   const itemCode = form.brand_code&&form.sku_suffix ? `${form.brand_code}-${form.sku_suffix}` : '';
 
-  const asItem = () => ({
+  const asItem = () => withBaseCosts({
     ...form,
     ...prices,
     item_code:              itemCode,
@@ -318,6 +318,8 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
     ...Object.fromEntries([...PRICE_COLUMNS, ...REAL_COLUMNS].map(c => [c, toNum(prices[c])])),
     target_margin_pct:      isCostPriced(form.price_used) ? targetMargin(form) : null,
   });
+  // The company base costs follow the cost and its currency, as the prices follow the source.
+  const withBaseCosts = (it) => ({ ...it, ...companyBaseCosts(it, rates) });
 
   const item    = asItem();
   const margins = (()=>{try{return calcAllMargins(item,rates);}catch{return null;}})();

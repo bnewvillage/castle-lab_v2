@@ -7,6 +7,7 @@ import { groupOf } from '../components/navConfig';
 import { DEMO } from '../demo/demoConfig';
 import PriceLists from './others/erp/PriceLists';
 import CatalogueChecks from './others/erp/CatalogueChecks';
+import CompanyBaseCost from './others/erp/CompanyBaseCost';
 import CostLookup from './others/CostLookup';
 import GlobalMarkupExport from './others/GlobalMarkupExport';
 import PriceRules from './others/PriceRules';
@@ -15,6 +16,7 @@ import PurchaseOrder from './others/PurchaseOrder';
 const MODULES = {
   'erp-export':    { label: 'Price Lists',      description: 'Upload-ready price list files for the ERP, and prices for stock the ERP holds without one.' },
   'erp-checks':    { label: 'Catalogue Checks', description: 'The catalogue against the ERP: items missing on either side, and items no price list covers.' },
+  'base-cost':     { label: 'Company Base Cost', description: 'What the group’s companies bill each other: EXW cost at the stored rates, in every market’s currency.' },
   'cost-lookup':   { label: 'Cost Lookup',    description: 'Paste a list of item codes and get their EXW costs back.' },
   'global-markup': { label: 'Global Markup',  description: 'Apply and export portfolio-wide markup adjustments.' },
   'rounding':      { label: 'Price Rules',    description: 'The rules every price is made by, and recalculating a market from UAE with a preview and one-step rollback.' },
@@ -73,6 +75,11 @@ export default function OthersMaster() {
           {tab === 'erp-checks' && (
             <motion.div key="erpc" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
               <CatalogueChecks creds={erpCreds} setCreds={setErpCreds} />
+            </motion.div>
+          )}
+          {tab === 'base-cost' && (
+            <motion.div key="bc" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
+              <CompanyBaseCost />
             </motion.div>
           )}
           {tab === 'cost-lookup' && (

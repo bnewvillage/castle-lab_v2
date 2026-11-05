@@ -7,7 +7,7 @@
 import * as XLSX from 'xlsx-js-style';
 import { fetchBrands, fetchRates } from './db';
 import { toNum } from './num';
-import { itemPrices } from './pricing';
+import { itemPrices, companyBaseCosts } from './pricing';
 import { PRICE_BASIS_VALUES, isCostPriced, basisPrice } from './priceBases';
 import { PRICE_COLUMNS, REAL_COLUMNS } from './markets';
 import { CURRENCIES } from '../apps/pricing/styles';
@@ -133,6 +133,7 @@ export function validateAndCalc(row, brandMap, markupCache, additionalMarkupCach
     ...row, brand_code: brandCode,
     _errors: errors, _warnings: warnings, _status: errors.length > 0 ? 'error' : 'ready',
     ...Object.fromEntries([...PRICE_COLUMNS, ...REAL_COLUMNS].map(c => [c, msrps?.[c] ?? null])),
+    ...companyBaseCosts(row, rates),
   };
 }
 

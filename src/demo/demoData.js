@@ -9,7 +9,7 @@
 // and rollbacks mutate it in place so the demo behaves like a real
 // backend for the length of a session. A page reload reseeds.
 // ─────────────────────────────────────────────────────────────
-import { calcMSRPs, itemPrices, calcProjectPrice } from '../lib/pricing';
+import { calcMSRPs, itemPrices, calcProjectPrice, companyBaseCosts } from '../lib/pricing';
 import { MARKETS, PRICE_COLUMNS, REAL_COLUMNS, FLAG_COLUMNS, DERIVED, MARKET } from '../lib/markets';
 import { round } from '../lib/num';
 
@@ -159,6 +159,8 @@ function buildBrandItems(def, rng) {
       row.uae_overridden = true;
       row.msrp_aed = round(row.msrp_aed * 1.03);
     }
+
+    Object.assign(row, companyBaseCosts(row, RATES));
 
     items.push(row);
   }
