@@ -309,7 +309,8 @@ export default function ItemList({ rates, brands, onEditItem, maximized, setExpo
         return true;
       });
       setRows(pg===0 ? filtered : prev=>[...prev,...filtered]);
-      setTotal(count); setPage(pg); setLoaded(true);
+      if (pg === 0) setTotal(count);   // later pages don't recount
+      setPage(pg); setLoaded(true);
     } catch(e) { setError(e.message); }
     finally { setLoading(false); }
   };

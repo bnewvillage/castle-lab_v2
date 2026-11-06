@@ -92,10 +92,20 @@ export default function SingleSKU({ rates, brands, editTarget, onEditTargetConsu
     }).catch(() => onToast?.(`${linkedCode} isn't in the catalogue`, false));
   }, [linkedCode]);
 
-  const handleSearch = useCallback(async(q) => {
+  // Searches once typing pauses, not on every keystroke, and only the latest
+  // search's results are shown: a slow reply to older text is dropped.
+  const searchSeq = useRef(0);
+  const handleSearch = useCallback((q) => {
     setQuery(q);
+    const seq = ++searchSeq.current;
     if (!q.trim()) { setResults([]); return; }
-    try { setResults(await searchItems(q)); } catch(e) { console.error(e); }
+    setTimeout(async () => {
+      if (seq !== searchSeq.current) return;   // typed on since
+      try {
+        const found = await searchItems(q);
+        if (seq === searchSeq.current) setResults(found);
+      } catch(e) { console.error(e); }
+    }, 200);
   }, []);
 
   const handleSelect = async(item) => {

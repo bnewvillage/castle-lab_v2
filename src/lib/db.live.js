@@ -198,7 +198,10 @@ export async function fetchItemList({
 } = {}) {
   let query = supabase
     .from('pricing_master')
-    .select(`item_code, item_name, barcode, brand_code, cost_currency, exw_cost, shipping_rate, customs_duty_rate, msrp_primary_ex_vat, msrp_primary_inc_vat, msrp_primary_currency, msrp_secondary_ex_vat, msrp_secondary_inc_vat, msrp_secondary_currency, price_used, ${PRICES_SELECT}, price_source, cost_source, target_margin_pct, created_at, updated_at, updated_by`, { count: 'exact' })
+    .select(`item_code, item_name, barcode, brand_code, cost_currency, exw_cost, shipping_rate, customs_duty_rate, msrp_primary_ex_vat, msrp_primary_inc_vat, msrp_primary_currency, msrp_secondary_ex_vat, msrp_secondary_inc_vat, msrp_secondary_currency, price_used, ${PRICES_SELECT}, price_source, cost_source, target_margin_pct, created_at, updated_at, updated_by`,
+      // Counting matches is a full scan of them, so only the first page of a
+      // search, filter or sort asks; later pages keep that total.
+      page === 0 ? { count: 'exact' } : undefined)
     .order(sortCol, { ascending: sortDir === 'asc', nullsFirst: false })
     .range(page * pageSize, (page + 1) * pageSize - 1);
 
