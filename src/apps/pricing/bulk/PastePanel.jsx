@@ -79,6 +79,10 @@ export default function PastePanel({ paste, setPasteField, opts, setOpt, brands,
             <input value={opts.shipping_rate} onChange={e=>setOpt('shipping_rate', e.target.value)}
               placeholder="0" style={inp(!!opts.shipping_rate,false)} />
           </Field>
+          <Field label="MSRP VAT %" hint="fills the empty side, every row">
+            <input value={opts.msrp_vat_pct} onChange={e=>setOpt('msrp_vat_pct', e.target.value)}
+              placeholder="e.g. 19" style={inp(!!opts.msrp_vat_pct,false)} disabled={isCostBased} />
+          </Field>
           <Field label="Customs %" hint="default 5.5">
             <input value={opts.customs_duty_rate} onChange={e=>setOpt('customs_duty_rate', e.target.value)}
               placeholder="5.5" style={inp(!!opts.customs_duty_rate,false)} />

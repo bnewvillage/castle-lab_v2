@@ -10,6 +10,8 @@
 //                  'exw'   the EXW cost at a target margin
 //                  'landed' the landed cost at a target margin
 //   msrp, currency for an MSRP basis, the fields holding the price and currency
+//   exMsrp         for an MSRP basis, its MSRP without VAT: what the EXW margin
+//                  compares with cost, whichever side the basis prices from
 //   paste          offered where only primary MSRPs are entered (paste import,
 //                  Bulk Update)
 //   defaultMargin  for a cost basis, the target margin a blank stands for
@@ -21,6 +23,7 @@ import { toNum } from './num';
 
 const msrp = (value, label, short, field, currency, paste) => ({
   value, label, short, source: 'msrp', msrp: field, currency, paste,
+  exMsrp: field.replace('_inc_vat', '_ex_vat'),
   inputs: [field, currency], describe: 'brand markup applied',
 });
 
@@ -63,4 +66,16 @@ export function basisPrice(item) {
   const b = PRICE_BASIS[item.price_used];
   if (!b?.msrp) return { value: null, currency: null };
   return { value: toNum(item[b.msrp]), currency: item[b.currency] || null };
+}
+
+/**
+ * The vendor's MSRP without VAT, as { value, currency }: what the EXW margin
+ * compares with cost. Vendor VAT isn't margin, so a basis that prices from
+ * the VAT-inclusive MSRP still compares its excluding-VAT side. Nulls for a
+ * cost basis.
+ */
+export function exwPrice(item) {
+  const b = PRICE_BASIS[item.price_used];
+  if (!b?.exMsrp) return { value: null, currency: null };
+  return { value: toNum(item[b.exMsrp]), currency: item[b.currency] || null };
 }

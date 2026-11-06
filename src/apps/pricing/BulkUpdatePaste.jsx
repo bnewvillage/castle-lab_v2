@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { toNum } from '../../lib/num';
+import { fillVatPair } from '../../lib/vat';
 import * as XLSX from 'xlsx-js-style';
 import { fetchBrands, fetchRates, fetchItemsByCodes, bulkUpdateItemFields } from '../../lib/db';
 import { itemPrices, companyBaseCosts } from '../../lib/pricing';
@@ -104,6 +105,7 @@ export default function BulkUpdatePaste({ onToast, isViewer }) {
   });
   const [brands, setBrands] = useState([]);
   const [plan,   setPlan]   = useState(null);
+  const [vatPct, setVatPct] = useState('');   // the supplier's VAT: fills each row's empty MSRP side, not stored
   const [busy,   setBusy]   = useState(false);
   const [err,    setErr]    = useState('');
   const [done,   setDone]   = useState(null);
@@ -164,6 +166,9 @@ export default function BulkUpdatePaste({ onToast, isViewer }) {
           if (v !== undefined && v !== '') incoming[f.k] = v;
         }
         for (const f of fedOpt) incoming[f.k] = opts[f.k];
+        // One supplier, one VAT %: a row pasted with only one MSRP side gets the other.
+        const pair = fillVatPair(incoming.msrp_primary_ex_vat, incoming.msrp_primary_inc_vat, vatPct);
+        if (pair.filled) incoming[pair.filled === 'ex' ? 'msrp_primary_ex_vat' : 'msrp_primary_inc_vat'] = pair[pair.filled];
 
         const diffs = [];
         for (const [k, v] of Object.entries(incoming)) {
@@ -254,6 +259,10 @@ export default function BulkUpdatePaste({ onToast, isViewer }) {
           Anything left blank is not written. Nothing here is required.
         </div>
         <div style={{ display:'flex', flexWrap:'wrap', gap:12 }}>
+          <Field label="MSRP VAT %">
+            <input value={vatPct} onChange={e => { setVatPct(e.target.value); setPlan(null); setDone(null); }}
+              placeholder="e.g. 19" style={inp(!!vatPct, false)} title="Fills the MSRP side a row was pasted without, on every row. Not stored." />
+          </Field>
           <Field label="Brand prefix">
             <BrandSelect brands={brands} value={opts.brand_code} nullable
               onChange={v => setOpt('brand_code', v)} placeholder="None" />

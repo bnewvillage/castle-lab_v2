@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import * as XLSX from 'xlsx-js-style';
 import { toNum, money } from '../../lib/num';
+import { fillVatPair } from '../../lib/vat';
 import { fetchBrands, fetchRates, bulkSaveItems, checkExisting, fetchItemsByCodes } from '../../lib/db';
 import { PRICE_BASIS_VALUES, isCostPriced, basisPrice } from '../../lib/priceBases';
 import { DERIVED, PRICE_COLUMNS } from '../../lib/markets';
@@ -58,6 +59,7 @@ export default function BulkUpload({ onToast }) {
     brand_code: '', cost_currency: 'EUR', msrp_primary_currency: 'EUR',
     price_used: 'primary_ex_vat', cost_source: '', price_source: '',
     shipping_rate: '', customs_duty_rate: '', target_margin_pct: '',
+    msrp_vat_pct: '',   // the supplier's VAT, typed each time; fills each row's empty MSRP side
   });
   const setPasteField = (k, v) => setPaste(p => ({ ...p, [k]: v }));
   const setOpt        = (k, v) => setPasteOpts(p => ({ ...p, [k]: v }));
@@ -186,6 +188,8 @@ export default function BulkUpload({ onToast }) {
       const data = [];
       skus.forEach((sku, i) => {
         if (!sku) return; // blank line in the SKU column = no row
+        // A paste comes from one supplier, so one VAT % fills every row's empty side.
+        const msrp = fillVatPair(exv[i], inv[i], pasteOpts.msrp_vat_pct);
         data.push({
           sku,
           item_code:               brand ? `${brand}-${sku}` : sku,
@@ -195,8 +199,8 @@ export default function BulkUpload({ onToast }) {
           cost_currency:           pasteOpts.cost_currency,
           exw_cost:                costs[i] ?? '',
           msrp_primary_currency:   pasteOpts.msrp_primary_currency,
-          msrp_primary_ex_vat:     exv[i] ?? '',
-          msrp_primary_inc_vat:    inv[i] ?? '',
+          msrp_primary_ex_vat:     msrp.ex ?? '',
+          msrp_primary_inc_vat:    msrp.inc ?? '',
           price_used:              pasteOpts.price_used,
           cost_source:             pasteOpts.cost_source,
           price_source:            pasteOpts.price_source,

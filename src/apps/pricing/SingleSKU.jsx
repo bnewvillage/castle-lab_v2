@@ -4,7 +4,8 @@ import { useLocation } from 'react-router-dom';
 import { fetchBrandRule, fetchBrandDefaults, searchItems, fetchItem, fetchHistory, saveItem } from '../../lib/db';
 import { toNum, hasNum, round, money } from '../../lib/num';
 import { calcAllMargins, calcEmployeePrices, formatMargin, MARGIN_COLORS, itemPrices, companyBaseCosts } from '../../lib/pricing';
-import { PRICE_BASES, PRICE_BASIS, isCostPriced, basisNeeds, basisPrice, targetMargin } from '../../lib/priceBases';
+import { PRICE_BASES, PRICE_BASIS, isCostPriced, basisNeeds, exwPrice, targetMargin } from '../../lib/priceBases';
+import { fillVatPair, vatFromPair } from '../../lib/vat';
 import { MARKETS, UAE, DERIVED, PRICE_COLUMNS, REAL_COLUMNS, FLAG_COLUMNS, deriveMarkets } from '../../lib/markets';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead, segDiv, CURRENCIES, SOURCES } from './styles';
 import BrandSelect from './BrandSelect';
@@ -42,11 +43,32 @@ function shownPrices(form, derived) {
   };
 }
 
+// The two vendor MSRPs, each a with/without-VAT pair.
+const PAIRS = ['primary', 'secondary'];
+const exKey  = (g) => `msrp_${g}_ex_vat`;
+const incKey = (g) => `msrp_${g}_inc_vat`;
+const vatKey = (g) => `${g}_vat_pct`;   // typed each time, never stored
+
+/**
+ * Opening a saved item: its stored pair gives back the VAT %, and the with-VAT
+ * side is treated as filled from it, so editing the price without VAT carries
+ * it along. A pair that doesn't come back exactly stays as two typed prices.
+ */
+function openPairs(item) {
+  const out = { ...item };
+  for (const g of PAIRS) {
+    const vat = vatFromPair(item[exKey(g)], item[incKey(g)]);
+    out[vatKey(g)] = vat ?? '';
+    if (vat != null && fillVatPair(item[exKey(g)], null, vat).inc === toNum(item[incKey(g)])) out[incKey(g)] = '';
+  }
+  return out;
+}
+
 // ── ROOT ──────────────────────────────────────────────────────
 const BLANK = {
   sku_suffix:'', item_name:'', brand_code:'', barcode:'',
-  msrp_primary_ex_vat:'', msrp_primary_inc_vat:'', msrp_primary_currency:'EUR',
-  msrp_secondary_ex_vat:'', msrp_secondary_inc_vat:'', msrp_secondary_currency:'',
+  msrp_primary_ex_vat:'', msrp_primary_inc_vat:'', msrp_primary_currency:'EUR', primary_vat_pct:'',
+  msrp_secondary_ex_vat:'', msrp_secondary_inc_vat:'', msrp_secondary_currency:'', secondary_vat_pct:'',
   price_used:'', price_source:'',
   ...Object.fromEntries(PRICE_COLUMNS.map(c => [c, ''])), target_margin_pct:'',
   ...Object.fromEntries(FLAG_COLUMNS.map(c => [c, false])),
@@ -280,7 +302,7 @@ export default function SingleSKU({ rates, brands, editTarget, onEditTargetConsu
 
 function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
   const { isViewer } = useAuth();
-  const [form,setForm]             = useState(existing?{...BLANK,...existing,sku_suffix:existing.item_code?.split('-').slice(1).join('-')||'',barcode:existing.barcode||''}:BLANK);
+  const [form,setForm]             = useState(existing?openPairs({...BLANK,...existing,sku_suffix:existing.item_code?.split('-').slice(1).join('-')||'',barcode:existing.barcode||''}):BLANK);
   const [markup,setMarkup]                   = useState(null);
   const [additionalMarkup,setAdditionalMarkup] = useState(null);
   const [hint,setHint]             = useState(null);
@@ -311,10 +333,15 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
     }).catch(() => { setHint(null); setPriceHint(null); });
   }, [form.brand_code]);
 
+  // Each MSRP pair with its empty side filled from the VAT %. Everything priced
+  // from the MSRPs reads src, so the filled side counts as if typed.
+  const pairs = Object.fromEntries(PAIRS.map(g => [g, fillVatPair(form[exKey(g)], form[incKey(g)], form[vatKey(g)])]));
+  const src   = { ...form, ...Object.fromEntries(PAIRS.flatMap(g => [[exKey(g), pairs[g].ex ?? ''], [incKey(g), pairs[g].inc ?? '']])) };
+
   // View mode shows what is stored; editing shows what the inputs give.
   const prices = viewMode
     ? Object.fromEntries([...PRICE_COLUMNS, ...REAL_COLUMNS].map(c => [c, form[c]]))
-    : shownPrices(form, derivePrices(form, { markup, additionalMarkup, rates }));
+    : shownPrices(src, derivePrices(src, { markup, additionalMarkup, rates }));
 
   // Overriding starts from the price shown; reverting goes back to working it out.
   const toggleOverride = (m) => setForm(f => f[m.flag]
@@ -322,7 +349,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
     : { ...f, [m.flag]: true, [m.price]: prices[m.price] });
 
   const hasVal = hasNum;
-  const availableBases = PRICE_BASES.filter(b => hasVal(form[basisNeeds(b)]));
+  const availableBases = PRICE_BASES.filter(b => hasVal(src[basisNeeds(b)]));
   const basisOptions   = availableBases.length>0 ? availableBases : PRICE_BASES;
   const basis          = PRICE_BASIS[form.price_used];
   const itemCode = form.brand_code&&form.sku_suffix ? `${form.brand_code}-${form.sku_suffix}` : '';
@@ -335,10 +362,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
     exw_cost:               form.exw_cost!==''?toNum(form.exw_cost)||0:null,
     shipping_rate:          toNum(form.shipping_rate)||0,
     customs_duty_rate:      toNum(form.customs_duty_rate)??5.5,
-    msrp_primary_ex_vat:    hasVal(form.msrp_primary_ex_vat)?toNum(form.msrp_primary_ex_vat):null,
-    msrp_primary_inc_vat:   hasVal(form.msrp_primary_inc_vat)?toNum(form.msrp_primary_inc_vat):null,
-    msrp_secondary_ex_vat:  hasVal(form.msrp_secondary_ex_vat)?toNum(form.msrp_secondary_ex_vat):null,
-    msrp_secondary_inc_vat: hasVal(form.msrp_secondary_inc_vat)?toNum(form.msrp_secondary_inc_vat):null,
+    ...Object.fromEntries(PAIRS.flatMap(g => [[exKey(g), pairs[g].ex], [incKey(g), pairs[g].inc]])),
     ...Object.fromEntries([...PRICE_COLUMNS, ...REAL_COLUMNS].map(c => [c, toNum(prices[c])])),
     target_margin_pct:      isCostPriced(form.price_used) ? targetMargin(form) : null,
   });
@@ -358,9 +382,10 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
       setEstimateError('Enter a margin % between 0 and 100');
       return;
     }
-    const { value: priceVal, currency: priceCurrency } = basisPrice(form);
+    // The inverse of the EXW margin, so from the same MSRP without VAT.
+    const { value: priceVal, currency: priceCurrency } = exwPrice(src);
     if (priceVal == null || !priceCurrency) {
-      setEstimateError('Select a price basis and fill MSRP first');
+      setEstimateError('Select a price basis and fill the MSRP without VAT first');
       return;
     }
     const priceRate     = rates[priceCurrency] || 1;
@@ -378,8 +403,8 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
     if (!form.sku_suffix?.trim()) { fe.sku_suffix=true; ge.identity=true; }
     if (!form.item_name?.trim())  { fe.item_name=true;  ge.identity=true; }
     const costBased = isCostPriced(form.price_used);
-    const hasPri = hasVal(form.msrp_primary_ex_vat) || hasVal(form.msrp_primary_inc_vat);
-    const hasSec = hasVal(form.msrp_secondary_ex_vat) || hasVal(form.msrp_secondary_inc_vat);
+    const hasPri = hasVal(src.msrp_primary_ex_vat) || hasVal(src.msrp_primary_inc_vat);
+    const hasSec = hasVal(src.msrp_secondary_ex_vat) || hasVal(src.msrp_secondary_inc_vat);
     if (!hasPri && !costBased)    { fe.msrp_primary=true; ge.priceData=true; }
     if (!form.msrp_primary_currency && (hasPri || !costBased)) { fe.msrp_primary_currency=true; ge.priceData=true; }
     if (costBased && !hasVal(form.exw_cost)) { fe.exw_cost=true; ge.costData=true; }
@@ -436,6 +461,46 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
       {hintText&&<span style={{fontSize:11,color:t.t4,fontFamily:'var(--font-mono)'}}>{hintText}</span>}
     </div>
   );
+
+  // One MSRP pair's inputs. A side left empty shows the price the VAT % fills
+  // in; typing into it makes it a typed price (never overwritten).
+  const vatPairInputs = (g, err) => {
+    const p = pairs[g];
+    const side = (key, which) => {
+      const filled = form[key] === '' && p.filled === which;
+      return {
+        ...I(key, err),
+        value: filled ? (p[which] ?? '') : (form[key] ?? ''),
+        style: { ...inp(hasVal(src[key]), err || fieldErrs[key]), ...(filled ? { color: t.t3, borderColor: 'rgba(62,207,142,0.35)' } : {}) },
+      };
+    };
+    return (
+      <>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 0.7fr',gap:12}}>
+          <div style={fg}>
+            <label style={lbl}>w/o VAT (ex VAT)</label>
+            <input {...side(exKey(g), 'ex')} type="text" inputMode="decimal" placeholder="—"/>
+            <span style={sub}>{p.filled === 'ex' && form[exKey(g)] === '' ? 'filled from VAT %' : "Before vendor's local tax"}</span>
+          </div>
+          <div style={fg}>
+            <label style={lbl}>w/ VAT (inc VAT)</label>
+            <input {...side(incKey(g), 'inc')} type="text" inputMode="decimal" placeholder="—"/>
+            <span style={sub}>{p.filled === 'inc' && form[incKey(g)] === '' ? 'filled from VAT %' : "Including vendor's local tax"}</span>
+          </div>
+          <div style={fg}>
+            <label style={lbl}>Vendor VAT %</label>
+            <input {...I(vatKey(g))} type="text" inputMode="decimal" placeholder="e.g. 19"/>
+            <span style={sub}>Fills the empty side · not stored</span>
+          </div>
+        </div>
+        {p.mismatch && (
+          <span style={{...sub, color:t.amber}}>
+            The two prices don't match the VAT % — check one of them, or clear the side you want filled.
+          </span>
+        )}
+      </>
+    );
+  };
 
   const costHint   = hint      ? `common: ${hint.cost_currency||'?'} · ${hint.shipping_rate??'?'}% · ${hint.customs_duty_rate??'?'}% duty · ${hint.cost_source||'?'}` : '';
   const priceHint2 = priceHint ? `common: ${priceHint.msrp_primary_currency||'?'} · ${PRICE_BASIS[priceHint.price_used]?.label||'?'} · ${priceHint.price_source||'?'}` : '';
@@ -544,18 +609,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
               </select>
               <span style={sub}>Vendor invoice currency for primary MSRP</span>
             </div>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-              <div style={fg}>
-                <label style={lbl}>w/o VAT (ex VAT)</label>
-                <input {...I('msrp_primary_ex_vat',fieldErrs.msrp_primary)} type="text" inputMode="decimal" placeholder="—"/>
-                <span style={sub}>Before vendor's local tax</span>
-              </div>
-              <div style={fg}>
-                <label style={lbl}>w/ VAT (inc VAT)</label>
-                <input {...I('msrp_primary_inc_vat',fieldErrs.msrp_primary)} type="text" inputMode="decimal" placeholder="—"/>
-                <span style={sub}>Including vendor's local tax</span>
-              </div>
-            </div>
+            {vatPairInputs('primary', fieldErrs.msrp_primary)}
           </div>
         </div>
 
@@ -566,7 +620,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
           <div style={groupBox(groupErrs.secondaryMSRP)}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
               <span style={{...groupHead,marginBottom:0}}>Secondary MSRP</span>
-              <button style={{...btnG,...btnSm,color:t.t4,borderColor:t.b1}} onClick={()=>{setShowSecondary(false);set('msrp_secondary_ex_vat','');set('msrp_secondary_inc_vat','');set('msrp_secondary_currency','');}}>Remove</button>
+              <button style={{...btnG,...btnSm,color:t.t4,borderColor:t.b1}} onClick={()=>{setShowSecondary(false);set('msrp_secondary_ex_vat','');set('msrp_secondary_inc_vat','');set('msrp_secondary_currency','');set('secondary_vat_pct','');}}>Remove</button>
             </div>
             <div style={{display:'flex',flexDirection:'column',gap:16}}>
               <div style={fg}>
@@ -576,10 +630,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
                   {CURRENCIES.map(cur=><option key={cur}>{cur}</option>)}
                 </select>
               </div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-                <div style={fg}><label style={lbl}>w/o VAT</label><input {...I('msrp_secondary_ex_vat')} type="text" inputMode="decimal" placeholder="—"/></div>
-                <div style={fg}><label style={lbl}>w/ VAT</label><input {...I('msrp_secondary_inc_vat')} type="text" inputMode="decimal" placeholder="—"/></div>
-              </div>
+              {vatPairInputs('secondary')}
             </div>
           </div>
         )}

@@ -6,7 +6,7 @@
 import { toNum, round } from './num';
 import { prettifyShelf } from './shelfRounding';
 import { MARKETS, deriveMarkets } from './markets';
-import { PRICE_BASIS, isCostPriced, targetMargin, basisPrice } from './priceBases';
+import { PRICE_BASIS, isCostPriced, targetMargin, basisPrice, exwPrice } from './priceBases';
 
 // Compound two markups multiplicatively: base% + additional% applied on top
 // e.g. compoundMarkup(10, 5) = ((1.10 × 1.05) - 1) × 100 = 15.5%
@@ -31,16 +31,16 @@ export function calcLandedCost({ exw_cost, shipping_rate, customs_duty_rate, cos
 // ── EXW MARGIN ────────────────────────────────────────────────
 
 /**
- * EXW margin — raw vendor price vs raw cost, both converted to AED
- * No markup, no shipping, no customs applied
+ * EXW margin — the vendor's MSRP without VAT vs raw cost, both converted to AED
+ * (exwPrice). No markup, no shipping, no customs, and no vendor VAT, which isn't margin
  *
- * price_aed  = basis price × its currency's rate
+ * price_aed  = MSRP without VAT × its currency's rate
  * cost_aed   = exw_cost × cost_currency_rate
  * exw_margin = (price_aed - cost_aed) / price_aed × 100
  */
 export function calcEXWMargin(item, rates) {
   if (item.exw_cost == null || !item.cost_currency || !rates?.[item.cost_currency]) return null;
-  const { value, currency } = basisPrice(item);
+  const { value, currency } = exwPrice(item);
   if (value == null || !currency || !rates?.[currency]) return null;
   const priceAED = value * rates[currency];
   const costAED  = item.exw_cost * rates[item.cost_currency];

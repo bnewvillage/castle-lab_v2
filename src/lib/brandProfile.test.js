@@ -51,6 +51,6 @@ test('a margin with no SKUs says why, counted by reason', () => {
   expect(mixed.exw.gaps).toEqual([
     { reason: 'priced from cost, so no vendor MSRP', count: 1 },
     { reason: 'no EXW cost', count: 1 },
-    { reason: 'no vendor MSRP entered', count: 1 },
+    { reason: 'no vendor MSRP without VAT', count: 1 },
   ]);
 });

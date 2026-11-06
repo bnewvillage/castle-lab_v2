@@ -5,7 +5,7 @@
 // EXW and landed margins. Pure: the caller supplies the brand's rows and the rates.
 // ─────────────────────────────────────────────────────────────
 import { calcEXWMargin, calcAllMargins } from './pricing';
-import { PRICE_BASIS, isCostPriced, basisPrice } from './priceBases';
+import { PRICE_BASIS, isCostPriced, exwPrice } from './priceBases';
 import { toNum, round } from './num';
 
 const pct = (n, total) => (total ? (n / total) * 100 : 0);
@@ -72,7 +72,7 @@ const noCost = (it) => !(toNum(it.exw_cost) > 0);
 function exwGap(it) {
   if (isCostPriced(it.price_used)) return 'priced from cost, so no vendor MSRP';
   if (noCost(it))                  return 'no EXW cost';
-  if (basisPrice(it).value == null) return 'no vendor MSRP entered';
+  if (exwPrice(it).value == null) return 'no vendor MSRP without VAT';
   return 'no exchange rate for its currency';
 }
 function landedGap(it) {
