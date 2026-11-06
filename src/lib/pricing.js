@@ -210,10 +210,19 @@ export function companyBaseCosts(item, rates) {
 
 // ── EMPLOYEE PRICE ────────────────────────────────────────────
 
-export function calcEmployeePrice(item, rates) {
+/**
+ * What an employee pays for an item, in every market's currency: its landed
+ * cost plus 15%, no VAT, converted at the stored rates and rounded down to the
+ * market's employeeStep (whole AED, SAR, QAR; KWD to 0.1). Keyed by market key;
+ * null without a landed cost.
+ */
+export function calcEmployeePrices(item, rates) {
   const landed = calcLandedCost(item, rates);
   if (landed == null) return null;
-  return Math.floor(landed * 1.15 * 1.05);
+  return Object.fromEntries(MARKETS.map(m => {
+    const inCurrency = landed * 1.15 / (m.rate ? (rates?.[m.rate.currency] || m.rate.fallback) : 1);
+    return [m.key, round(Math.floor(inCurrency / m.employeeStep + 1e-9) * m.employeeStep, m.dp)];
+  }));
 }
 
 // ── FORMAT HELPERS ────────────────────────────────────────────

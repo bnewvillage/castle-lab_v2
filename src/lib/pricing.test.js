@@ -1,4 +1,4 @@
-import { calcMSRPs, itemPrices, msrpsFromBaseShelf, applyAdditionalMarkupUAE, pricesAtAdditionalMarkup, calcAllMargins, calcProjectPrice } from './pricing';
+import { calcMSRPs, itemPrices, msrpsFromBaseShelf, applyAdditionalMarkupUAE, pricesAtAdditionalMarkup, calcAllMargins, calcProjectPrice, calcEmployeePrices } from './pricing';
 import { MARKETS } from './markets';
 import { prettifyShelf } from './shelfRounding';
 import { suggestKSAPrice, suggestKWDPrice } from './markets';
@@ -113,4 +113,12 @@ describe('one margin formula for every cost-priced price', () => {
       expect(itemPrices({ ...base, price_used }, { rates })).toEqual(itemPrices({ ...base, price_used, target_margin_pct: pct }, { rates }));
     }
   });
+});
+
+test('employee price: landed cost + 15%, no VAT, in each currency, rounded down', () => {
+  const rates = { AED: 1, EUR: 4.4, SAR: 0.98, QAR: 1.01, KWD: 11.904762 };
+  // 100 EUR, no shipping or customs: landed 440 AED; × 1.15 = 506 AED
+  const p = calcEmployeePrices({ exw_cost: 100, cost_currency: 'EUR', shipping_rate: 0, customs_duty_rate: 0 }, rates);
+  expect(p).toEqual({ aed: 506, sar: 516, qat: 500, kwd: 42.5 });   // 516.33 → 516 · 500.99 → 500 · 42.504 → 42.5
+  expect(calcEmployeePrices({ exw_cost: null, cost_currency: 'EUR' }, rates)).toBeNull();
 });

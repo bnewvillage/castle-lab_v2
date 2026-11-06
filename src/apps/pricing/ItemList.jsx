@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { fetchItemList, fetchHistory, deleteItem } from '../../lib/db';
-import { calcAllMargins, calcEmployeePrice, formatMargin, MARGIN_COLORS } from '../../lib/pricing';
+import { calcAllMargins, formatMargin, MARGIN_COLORS } from '../../lib/pricing';
+import EmployeePrices from './EmployeePrices';
 import { basisPrice } from '../../lib/priceBases';
 import { money } from '../../lib/num';
 import { MARKETS, PRICE_COLUMNS } from '../../lib/markets';
@@ -103,7 +104,6 @@ function InlineSummary({ item, rates }) {
   }, [item.item_code]);
 
   const margins = (() => { try { return calcAllMargins(item, rates); } catch { return null; } })();
-  const emp     = calcEmployeePrice(item, rates);
 
   const lastFor = (keys) => history.find(h => keys.some(k => h[`new_${k}`]!=null));
   const lastPrice = lastFor([...PRICE_COLUMNS,'msrp_primary_ex_vat','msrp_primary_inc_vat','msrp_secondary_ex_vat','msrp_secondary_inc_vat']);
@@ -154,10 +154,7 @@ function InlineSummary({ item, rates }) {
                   </div>
                 );
               })()}
-              <div style={{ ...rowStyle, borderBottom:'none' }}>
-                <span style={labelStyle}>Employee price</span>
-                <span style={{ ...valStyle, color:t.amber }}>{money(emp, 'AED')}</span>
-              </div>
+              <EmployeePrices item={item} rates={rates} style={{ paddingTop:8 }} />
             </div>
 
             {/* Col 2 — Last edited by */}

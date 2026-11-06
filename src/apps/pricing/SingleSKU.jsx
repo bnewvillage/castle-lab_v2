@@ -3,12 +3,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
 import { fetchBrandRule, fetchBrandDefaults, searchItems, fetchItem, fetchHistory, saveItem } from '../../lib/db';
 import { toNum, hasNum, round, money } from '../../lib/num';
-import { calcAllMargins, calcEmployeePrice, formatMargin, MARGIN_COLORS, itemPrices, companyBaseCosts } from '../../lib/pricing';
+import { calcAllMargins, calcEmployeePrices, formatMargin, MARGIN_COLORS, itemPrices, companyBaseCosts } from '../../lib/pricing';
 import { PRICE_BASES, PRICE_BASIS, isCostPriced, basisNeeds, basisPrice, targetMargin } from '../../lib/priceBases';
 import { MARKETS, UAE, DERIVED, PRICE_COLUMNS, REAL_COLUMNS, FLAG_COLUMNS, deriveMarkets } from '../../lib/markets';
 import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead, segDiv, CURRENCIES, SOURCES } from './styles';
 import BrandSelect from './BrandSelect';
 import BrandProfile from './BrandProfile';
+import EmployeePrices from './EmployeePrices';
 import { useAuth } from '../../lib/AuthContext';
 import { downloadXLSX } from '../../lib/xlsxExport';
 
@@ -112,7 +113,7 @@ export default function SingleSKU({ rates, brands, editTarget, onEditTargetConsu
   const handleFailed = (msg) => onToast?.(msg || 'Save failed — check your data', false);
 
   const margins = selected ? calcAllMargins(selected, rates) : null;
-  const emp     = selected ? calcEmployeePrice(selected, rates) : null;
+  const emp     = selected ? calcEmployeePrices(selected, rates) : null;
 
   const handleExportSelected = () => {
     if (!selected) return;
@@ -139,7 +140,7 @@ export default function SingleSKU({ rates, brands, editTarget, onEditTargetConsu
       landed_cost_aed:         margins?.landed_cost_aed != null ? +margins.landed_cost_aed.toFixed(2) : '',
       ...Object.fromEntries(MARKETS.map(m => [`${m.margin}_pct`, margins?.[m.margin] != null ? +margins[m.margin].toFixed(2) : ''])),
       exw_margin_pct:          margins?.exw_margin != null ? +margins.exw_margin.toFixed(2) : '',
-      employee_price_aed:      emp ?? '',
+      ...Object.fromEntries(MARKETS.map(m => [`employee_price_${m.key}`, emp?.[m.key] ?? ''])),
       updated_at:              selected.updated_at ?? '',
       updated_by:              selected.updated_by ?? '',
     };
@@ -221,14 +222,14 @@ export default function SingleSKU({ rates, brands, editTarget, onEditTargetConsu
             {(() => {
               const exwFmt = formatMargin(margins?.exw_margin);
               return (
-                <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:1, background:t.b1 }}>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:1, background:t.b1 }}>
                   <div style={{ background:t.bg2, padding:'14px 20px' }}><div style={{ fontSize:11, color:t.t4, fontFamily:'var(--font-mono)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:5 }}>EXW cost</div><div style={{ fontSize:13, color:t.t2 }}>{money(selected.exw_cost, selected.cost_currency)}</div></div>
                   <div style={{ background:t.bg2, padding:'14px 20px' }}><div style={{ fontSize:11, color:t.t4, fontFamily:'var(--font-mono)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:5 }}>EXW margin</div><div style={{ fontSize:13, fontWeight:500, color:MARGIN_COLORS[exwFmt.status] }}>{exwFmt.label}</div><div style={{ fontSize:10, color:t.t4, marginTop:2 }}>vendor MSRP vs cost · no markup</div></div>
                   <div style={{ background:t.bg2, padding:'14px 20px' }}><div style={{ fontSize:11, color:t.t4, fontFamily:'var(--font-mono)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:5 }}>Landed cost</div><div style={{ fontSize:13, fontWeight:500, color:t.t1 }}>{margins?.landed_cost_aed?`AED ${margins.landed_cost_aed.toFixed(2)}`:'—'}</div></div>
-                  <div style={{ background:t.bg2, padding:'14px 20px' }}><div style={{ fontSize:11, color:t.t4, fontFamily:'var(--font-mono)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:5 }}>Employee price</div><div style={{ fontSize:13, color:t.amber }}>AED {emp?.toLocaleString()||'—'}</div></div>
                 </div>
               );
             })()}
+            <EmployeePrices item={selected} rates={rates} style={{ padding:'8px 20px', borderTop:`1px solid ${t.b1}` }} />
             {history.length>0&&(
               <div style={{ background:t.bg1, borderTop:`1px solid ${t.b1}`, padding:'20px 24px' }}>
                 <div style={{ fontSize:11, color:t.t4, textTransform:'uppercase', letterSpacing:'0.08em', fontFamily:'var(--font-mono)', marginBottom:14 }}>Price history</div>
@@ -336,7 +337,6 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
 
   const item    = asItem();
   const margins = (()=>{try{return calcAllMargins(item,rates);}catch{return null;}})();
-  const emp     = calcEmployeePrice(item, rates);
 
   const handleEstimate = () => {
     if (isCostPriced(form.price_used)) {
@@ -508,7 +508,6 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
             </div>
             {[
               ['Landed cost',margins?.landed_cost_aed?`AED ${margins.landed_cost_aed.toFixed(2)}`:'—',t.t1],
-              ['Employee price',money(emp,'AED'),t.amber],
               ['Price basis',basis?.label||'—',t.t3],
               ['Item code',itemCode||'—',t.t3],
             ].map(([label,value,color])=>(
@@ -730,7 +729,6 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
       {modal==='summary'&&(()=>{
         const it  = asItem();
         const m   = calcAllMargins(it, rates);
-        const ep  = calcEmployeePrice(it, rates);
         const isEdit = !!existing;
 
         const DIFF_FIELDS = [
@@ -814,10 +812,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
                       </div>
                     );
                   })}
-                  {ep&&<div style={{display:'flex',justifyContent:'space-between',padding:'8px 0',fontSize:13}}>
-                    <span style={{color:t.t3}}>Employee price</span>
-                    <span style={{color:t.amber,fontFamily:'var(--font-mono)',fontSize:12}}>AED {ep.toLocaleString()}</span>
-                  </div>}
+                  <EmployeePrices item={it} rates={rates} style={{ paddingTop:8 }} />
                 </>
               ):(
                 <>
@@ -848,10 +843,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
                       </div>
                     );
                   })}
-                  {ep&&<div style={{display:'flex',justifyContent:'space-between',padding:'9px 0',fontSize:14}}>
-                    <span style={{color:t.t3}}>Employee price</span>
-                    <span style={{color:t.amber,fontFamily:'var(--font-mono)',fontSize:13}}>AED {ep.toLocaleString()}</span>
-                  </div>}
+                  <EmployeePrices item={it} rates={rates} style={{ paddingTop:9 }} />
                 </>
               )}
 

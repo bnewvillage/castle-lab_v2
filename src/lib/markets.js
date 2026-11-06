@@ -19,6 +19,7 @@
 //              (none for UAE: its prices are AED already)
 //   report     the ERP price-list report the Price Export reads
 //   recalcOp   price-history type of its "recalculate from UAE" run, if it has one
+//   employeeStep  what an employee price rounds down to in this currency
 //   derive     (UAE ex-VAT) → this market's stored price, rounded on its ladder
 // ─────────────────────────────────────────────────────────────
 import { round } from './num';
@@ -49,15 +50,15 @@ const market = (m) => ({
 });
 
 export const MARKETS = [
-  market({ key: 'aed', code: 'uae', short: 'UAE', label: 'UAE',    currency: 'AED', vat: 1.05, dp: 2, step: 0.05,
+  market({ key: 'aed', code: 'uae', short: 'UAE', label: 'UAE',    currency: 'AED', vat: 1.05, dp: 2, step: 0.05, employeeStep: 1,
            rate: null,                                        report: 'PRICE-AED_ValidFromLatest' }),
-  market({ key: 'sar', code: 'ksa', short: 'KSA', label: 'KSA',    currency: 'SAR', vat: 1.15, dp: 2, step: 0.05,
+  market({ key: 'sar', code: 'ksa', short: 'KSA', label: 'KSA',    currency: 'SAR', vat: 1.15, dp: 2, step: 0.05, employeeStep: 1,
            rate: { currency: 'SAR', fallback: 0.98 },         report: 'PRICE-SAR_ValidFromLatest', recalcOp: 'ksa_recalc',
            derive: suggestKSAPrice, factor: KSA_FACTOR, rule: `UAE ex-VAT × ${KSA_FACTOR} (to SAR) × 1.15 VAT` }),
-  market({ key: 'qat', code: 'qat', short: 'QAT', label: 'Qatar',  currency: 'QAR', vat: 1,    dp: 2, step: 0.05,
+  market({ key: 'qat', code: 'qat', short: 'QAT', label: 'Qatar',  currency: 'QAR', vat: 1,    dp: 2, step: 0.05, employeeStep: 1,
            rate: { currency: 'QAR', fallback: 1.01 },         report: 'PRICE-QAR_ValidFromLatest',
            derive: suggestQATPrice, factor: QAT_FACTOR, rule: `UAE ex-VAT × ${QAT_FACTOR} · no VAT` }),
-  market({ key: 'kwd', code: 'kwd', short: 'KWT', label: 'Kuwait', currency: 'KWD', vat: 1,    dp: 3, step: 0.001,
+  market({ key: 'kwd', code: 'kwd', short: 'KWT', label: 'Kuwait', currency: 'KWD', vat: 1,    dp: 3, step: 0.001, employeeStep: 0.1,
            rate: { currency: 'KWD', fallback: 1 / KWD_FACTOR }, report: 'PRICE-KWD_ValidFromLatest', recalcOp: 'kwd_recalc',
            derive: suggestKWDPrice, factor: KWD_FACTOR, rule: `UAE ex-VAT × ${KWD_FACTOR} (to KWD) · Kuwait rounding · no VAT` }),
 ];
