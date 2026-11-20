@@ -1,4 +1,3 @@
-export const CURRENCIES = ['EUR','USD','GBP','AUD','JPY','AED','SAR','QAR'];
 export const SOURCES    = ['Portal','File','Website','Invoice','Estimate'];
 
 // Design tokens — blue-tinted charcoal, mirrors :root vars in styles/global.css

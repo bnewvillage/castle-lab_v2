@@ -49,10 +49,31 @@ export async function fetchRates() {
   return rates;
 }
 
+// Every currency with its rate and when it last changed, for the Currencies page.
+export async function fetchCurrencies() {
+  const { data, error } = await supabase.from('exchange_rates')
+    .select('currency, rate_to_aed, updated_at').order('currency');
+  if (error) throw error;
+  return data.map(r => ({ currency: r.currency, rate: r.currency === 'AED' ? 1 : parseFloat(r.rate_to_aed), updated_at: r.updated_at }));
+}
+
+// Writes are admin-only (RLS). A refused update changes no rows rather than
+// erroring, so the row count is checked.
+const ADMIN_ONLY = 'Not saved: only admins can change exchange rates.';
+
 export async function updateRate(currency, rateToAED) {
-  const { error } = await supabase.from('exchange_rates')
+  const { data, error } = await supabase.from('exchange_rates')
     .update({ rate_to_aed: rateToAED, updated_at: new Date().toISOString() })
-    .eq('currency', currency);
+    .eq('currency', currency).select('currency');
+  if (error) throw error;
+  if (!data?.length) throw new Error(ADMIN_ONLY);
+}
+
+export async function addCurrency(currency, rateToAED) {
+  const { error } = await supabase.from('exchange_rates')
+    .insert({ currency, rate_to_aed: rateToAED, updated_at: new Date().toISOString() });
+  if (error?.code === '42501') throw new Error(ADMIN_ONLY);
+  if (error?.code === '23505') throw new Error(`${currency} is already in the list.`);
   if (error) throw error;
 }
 

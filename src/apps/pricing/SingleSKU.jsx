@@ -7,7 +7,8 @@ import { calcAllMargins, calcEmployeePrices, formatMargin, MARGIN_COLORS, itemPr
 import { PRICE_BASES, PRICE_BASIS, isCostPriced, basisNeeds, exwPrice, targetMargin } from '../../lib/priceBases';
 import { fillVatPair, vatFromPair } from '../../lib/vat';
 import { MARKETS, UAE, DERIVED, PRICE_COLUMNS, REAL_COLUMNS, FLAG_COLUMNS, deriveMarkets } from '../../lib/markets';
-import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead, segDiv, CURRENCIES, SOURCES } from './styles';
+import { useCurrencies } from '../../lib/currencies';
+import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead, segDiv, SOURCES } from './styles';
 import BrandSelect from './BrandSelect';
 import BrandProfile from './BrandProfile';
 import EmployeePrices from './EmployeePrices';
@@ -301,6 +302,7 @@ export default function SingleSKU({ rates, brands, editTarget, onEditTargetConsu
 // ── ITEM FORM ─────────────────────────────────────────────────
 
 function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
+  const currencies = useCurrencies();
   const { isViewer } = useAuth();
   const [form,setForm]             = useState(existing?openPairs({...BLANK,...existing,sku_suffix:existing.item_code?.split('-').slice(1).join('-')||'',barcode:existing.barcode||''}):BLANK);
   const [markup,setMarkup]                   = useState(null);
@@ -605,7 +607,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
             <div style={fg}>
               <label style={lbl}>Currency</label>
               <select {...S('msrp_primary_currency',fieldErrs.msrp_primary_currency)}>
-                {CURRENCIES.map(cur=><option key={cur}>{cur}</option>)}
+                {currencies.map(cur=><option key={cur}>{cur}</option>)}
               </select>
               <span style={sub}>Vendor invoice currency for primary MSRP</span>
             </div>
@@ -627,7 +629,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
                 <label style={lbl}>Currency</label>
                 <select {...S('msrp_secondary_currency',fieldErrs.msrp_secondary_currency)}>
                   <option value="">None</option>
-                  {CURRENCIES.map(cur=><option key={cur}>{cur}</option>)}
+                  {currencies.map(cur=><option key={cur}>{cur}</option>)}
                 </select>
               </div>
               {vatPairInputs('secondary')}
@@ -708,7 +710,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
               <div style={fg}>
                 <label style={lbl}>Cost currency</label>
                 <select {...S('cost_currency')}>
-                  {CURRENCIES.map(cur=><option key={cur}>{cur}</option>)}
+                  {currencies.map(cur=><option key={cur}>{cur}</option>)}
                 </select>
                 <span style={sub}>Currency of EXW price / vendor invoice</span>
               </div>

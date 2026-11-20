@@ -7,7 +7,8 @@ import { MARKETS, UAE, DERIVED, FLAG_COLUMNS, deriveMarket } from '../../lib/mar
 import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead } from './styles';
 import { toNum, hasNum, round, money } from '../../lib/num';
 import { useAuth } from '../../lib/AuthContext';
-import { LOCAL_CURRENCIES, PROJECT_CURRENCIES } from './projectConstants';
+import { LOCAL_CURRENCIES } from './projectConstants';
+import { useCurrencies } from '../../lib/currencies';
 
 const hasVal = hasNum;
 const byFlag   = (fn) => Object.fromEntries(FLAG_COLUMNS.map(c => [c, fn(c)]));
@@ -47,6 +48,7 @@ const BLANK = {
 
 // ── ITEM FORM ─────────────────────────────────────────────────
 export default function ProjectItemForm({ rates, existing, existingCodes, onSave, onFail, onCancel, onViewExisting }) {
+  const currencies = useCurrencies();
   const { isViewer } = useAuth();
 
   const toForm = (item) => item ? {
@@ -291,7 +293,7 @@ export default function ProjectItemForm({ rates, existing, existingCodes, onSave
               <div style={fg}>
                 <label style={lbl}>Currency</label>
                 <select {...S('cost_currency', fieldErrs.cost_currency)}>
-                  {PROJECT_CURRENCIES.map(cur => <option key={cur}>{cur}</option>)}
+                  {currencies.map(cur => <option key={cur}>{cur}</option>)}
                 </select>
               </div>
               <div style={fg}>

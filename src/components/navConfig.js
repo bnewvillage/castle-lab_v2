@@ -10,7 +10,7 @@
 import {
   IconGrid, IconTag, IconUpload, IconList, IconBookmark, IconFolder, IconRefresh,
   IconHistory, IconFileExport, IconPercent, IconCart, IconEdit, IconSearch, IconCheckList,
-  IconLayers, IconZap,
+  IconLayers, IconZap, IconExchange,
 } from './icons';
 
 export const NAV = [
@@ -41,6 +41,7 @@ export const NAV = [
       { label: 'Brands',         icon: IconBookmark, path: '/apps/pricing-master/brands' },
       { label: 'Global Markup',  icon: IconPercent,  path: '/apps/others/global-markup' },
       { label: 'Price Rules',    icon: IconRefresh,  path: '/apps/others/rounding' },
+      { label: 'Currencies',     icon: IconExchange,  path: '/apps/others/currencies' },
       { label: 'Rollback',       icon: IconHistory,  path: '/apps/pricing-master/rollback' },
     ],
   },

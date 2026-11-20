@@ -9,7 +9,8 @@ import { MARKETS } from '../../lib/markets';
 
 // The fields a company base cost is worked out from.
 const BASE_COST_INPUTS = new Set(['exw_cost', 'cost_currency']);
-import { t, inp, sel, btnW, btnG, lbl, groupBox, groupHead, CURRENCIES } from './styles';
+import { useCurrencies } from '../../lib/currencies';
+import { t, inp, sel, btnW, btnG, lbl, groupBox, groupHead } from './styles';
 import BrandSelect from './BrandSelect';
 
 const SOURCES         = ['Portal','File','Website','Invoice','Estimate'];
@@ -28,8 +29,8 @@ const ROW_FIELDS = PASTE_FIELDS.filter(f => f.key);
 
 // Applied to every matched row. Left at NO_CHANGE they are never written.
 const OPT_FIELDS = [
-  { k:'cost_currency',         label:'Cost currency',   opts:CURRENCIES },
-  { k:'msrp_primary_currency', label:'MSRP currency',   opts:CURRENCIES },
+  { k:'cost_currency',         label:'Cost currency',   currency:true },
+  { k:'msrp_primary_currency', label:'MSRP currency',   currency:true },
   { k:'price_used',            label:'Price basis',     opts:PASTE_BASIS_VALUES },
   { k:'cost_source',           label:'Cost source',     opts:SOURCES },
   { k:'price_source',          label:'Price source',    opts:SOURCES },
@@ -99,6 +100,7 @@ function Pill({ label, value, color }) {
   );
 }
 export default function BulkUpdatePaste({ onToast, isViewer }) {
+  const currencies = useCurrencies();
   const [paste, setPaste] = useState(Object.fromEntries(PASTE_FIELDS.map(f => [f.k, ''])));
   const [opts,  setOpts]  = useState({
     brand_code: '', ...Object.fromEntries(OPT_FIELDS.map(f => [f.k, NO_CHANGE])),
@@ -267,19 +269,22 @@ export default function BulkUpdatePaste({ onToast, isViewer }) {
             <BrandSelect brands={brands} value={opts.brand_code} nullable
               onChange={v => setOpt('brand_code', v)} placeholder="None" />
           </Field>
-          {OPT_FIELDS.map(f => (
-            <Field key={f.k} label={f.label}>
-              {f.opts ? (
-                <select value={opts[f.k]} onChange={e => setOpt(f.k, e.target.value)} style={sel(!!opts[f.k], false)}>
-                  <option value={NO_CHANGE}>— no change</option>
-                  {f.opts.map(o => <option key={o} value={o}>{o}</option>)}
-                </select>
-              ) : (
-                <input value={opts[f.k]} onChange={e => setOpt(f.k, e.target.value)}
-                  placeholder={f.ph} style={inp(!!opts[f.k], false)} />
-              )}
-            </Field>
-          ))}
+          {OPT_FIELDS.map(f => {
+            const choices = f.currency ? currencies : f.opts;
+            return (
+              <Field key={f.k} label={f.label}>
+                {choices ? (
+                  <select value={opts[f.k]} onChange={e => setOpt(f.k, e.target.value)} style={sel(!!opts[f.k], false)}>
+                    <option value={NO_CHANGE}>— no change</option>
+                    {choices.map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                ) : (
+                  <input value={opts[f.k]} onChange={e => setOpt(f.k, e.target.value)}
+                    placeholder={f.ph} style={inp(!!opts[f.k], false)} />
+                )}
+              </Field>
+            );
+          })}
         </div>
       </div>
 

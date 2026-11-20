@@ -13,6 +13,8 @@ const impl = DEMO ? demo : live;
 
 export const fetchRates                = (...a) => impl.fetchRates(...a);
 export const updateRate                = (...a) => impl.updateRate(...a);
+export const fetchCurrencies           = (...a) => impl.fetchCurrencies(...a);
+export const addCurrency               = (...a) => impl.addCurrency(...a);
 export const fetchBrands               = (...a) => impl.fetchBrands(...a);
 export const addBrand                  = (...a) => impl.addBrand(...a);
 export const fetchBrandRule            = (...a) => impl.fetchBrandRule(...a);

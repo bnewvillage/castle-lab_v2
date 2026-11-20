@@ -43,9 +43,21 @@ export async function fetchRates() {
   return { ...store.rates, AED: 1 };
 }
 
+export async function fetchCurrencies() {
+  await wait(80);
+  const rates = { ...store.rates, AED: 1 };
+  return Object.keys(rates).sort().map(c => ({ currency: c, rate: rates[c], updated_at: store.rateUpdatedAt?.[c] ?? null }));
+}
+
 export async function updateRate(currency, rateToAED) {
   await wait();
   store.rates[currency] = rateToAED;
+  (store.rateUpdatedAt ??= {})[currency] = new Date().toISOString();
+}
+
+export async function addCurrency(currency, rateToAED) {
+  if (currency in store.rates || currency === 'AED') throw new Error(`${currency} is already in the list.`);
+  return updateRate(currency, rateToAED);
 }
 
 // ── BRANDS ────────────────────────────────────────────────────

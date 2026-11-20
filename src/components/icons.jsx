@@ -136,3 +136,10 @@ export const IconZap = ({ size = 16 }) => (
     <path d="M13 2L3 14h8l-1 8 10-12h-8l1-8z"/>
   </svg>
 );
+
+// Two arrows passing each other: exchange rates.
+export const IconExchange = ({ size = 16 }) => (
+  <svg {...base(size)}>
+    <path d="M4 8h14l-4-4"/><path d="M20 16H6l4 4"/>
+  </svg>
+);

@@ -10,7 +10,7 @@ import { toNum } from './num';
 import { itemPrices, companyBaseCosts } from './pricing';
 import { PRICE_BASIS_VALUES, isCostPriced, basisPrice } from './priceBases';
 import { PRICE_COLUMNS, REAL_COLUMNS } from './markets';
-import { CURRENCIES } from '../apps/pricing/styles';
+import { currencyCodes } from './currencies';
 
 export const SOURCES            = ['Portal','File','Website','Invoice','Estimate'];
 export const LARGE_THRESHOLD    = 5000;  // above this, paginate review and show progress
@@ -25,6 +25,7 @@ export const MERGE_FIELDS = ['item_name','barcode','cost_currency','exw_cost','s
 export async function generateTemplate() {
   const [brands, rates] = await Promise.all([fetchBrands(), fetchRates()]);
   const wb = XLSX.utils.book_new();
+  const currencies = currencyCodes(rates);
 
   const importHeaders = [
     'sku','item_name','brand_code','cost_currency','exw_cost',
@@ -76,12 +77,12 @@ export async function generateTemplate() {
 
   XLSX.utils.book_append_sheet(wb, importWs, 'Import');
 
-  const maxLen = Math.max(brands.length, PRICE_BASIS_VALUES.length, CURRENCIES.length, SOURCES.length);
+  const maxLen = Math.max(brands.length, PRICE_BASIS_VALUES.length, currencies.length, SOURCES.length);
   const refData = [
     ['brand_code','brand_name','','price_used options','','currencies','','sources'],
     ...Array.from({length:maxLen},(_,i) => [
       brands[i]?.brand_code||'', brands[i]?.brand_name||'', '',
-      PRICE_BASIS_VALUES[i]||'', '', CURRENCIES[i]||'', '', SOURCES[i]||'',
+      PRICE_BASIS_VALUES[i]||'', '', currencies[i]||'', '', SOURCES[i]||'',
     ]),
   ];
   const refWs = XLSX.utils.aoa_to_sheet(refData);

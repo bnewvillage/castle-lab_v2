@@ -11,6 +11,7 @@ import CompanyBaseCost from './others/erp/CompanyBaseCost';
 import CostLookup from './others/CostLookup';
 import GlobalMarkupExport from './others/GlobalMarkupExport';
 import PriceRules from './others/PriceRules';
+import Currencies from './others/Currencies';
 import PurchaseOrder from './others/PurchaseOrder';
 
 const MODULES = {
@@ -19,6 +20,7 @@ const MODULES = {
   'base-cost':     { label: 'Company Base Cost', description: 'What the group’s companies bill each other: EXW cost at the stored rates, in every market’s currency.' },
   'cost-lookup':   { label: 'Cost Lookup',    description: 'Paste a list of item codes and get their EXW costs back.' },
   'global-markup': { label: 'Global Markup',  description: 'Apply and export portfolio-wide markup adjustments.' },
+  'currencies':    { label: 'Currencies',     description: 'The exchange rates to AED, and the currencies items can be costed or priced in.' },
   'rounding':      { label: 'Price Rules',    description: 'The rules every price is made by, and recalculating a market from UAE with a preview and one-step rollback.' },
   'purchase-order': { label: 'Purchase Order', description: "Build a PO from the ERP's open purchase requests or from pasted item codes, and download the items file to upload to the ERP." },
 };
@@ -95,6 +97,11 @@ export default function OthersMaster() {
           {tab === 'purchase-order' && (
             <motion.div key="po" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
               <PurchaseOrder creds={erpCreds} setCreds={setErpCreds} />
+            </motion.div>
+          )}
+          {tab === 'currencies' && (
+            <motion.div key="cur" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
+              <Currencies />
             </motion.div>
           )}
           {tab === 'rounding' && (

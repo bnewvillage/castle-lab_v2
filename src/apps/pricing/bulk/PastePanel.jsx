@@ -1,5 +1,6 @@
-import { t, inp, sel, btnW, btnG, lbl, groupBox, groupHead, CURRENCIES } from '../styles';
+import { t, inp, sel, btnW, btnG, lbl, groupBox, groupHead } from '../styles';
 import BrandSelect from '../BrandSelect';
+import { useCurrencies } from '../../../lib/currencies';
 import BrandProfile from '../BrandProfile';
 import { SOURCES } from '../../../lib/bulkImport';
 import { PRICE_BASIS, PASTE_BASIS_VALUES, isCostPriced } from '../../../lib/priceBases';
@@ -22,6 +23,7 @@ const pasteBox = {
 };
 
 export default function PastePanel({ paste, setPasteField, opts, setOpt, brands, processing, isViewer, onProcess }) {
+  const currencies = useCurrencies();
   const skuCount = paste.sku.split('\n').filter(s => s.trim()).length;
   const isCostBased = isCostPriced(opts.price_used);
   const ready = skuCount > 0 && opts.brand_code && !processing && !isViewer;
@@ -54,13 +56,13 @@ export default function PastePanel({ paste, setPasteField, opts, setOpt, brands,
           </Field>
           <Field label="Cost currency *">
             <select value={opts.cost_currency} onChange={e=>setOpt('cost_currency', e.target.value)} style={sel(true,false)}>
-              {CURRENCIES.map(c => <option key={c}>{c}</option>)}
+              {currencies.map(c => <option key={c}>{c}</option>)}
             </select>
           </Field>
           <Field label="MSRP currency" hint={isCostBased ? 'unused' : undefined}>
             <select value={opts.msrp_primary_currency} onChange={e=>setOpt('msrp_primary_currency', e.target.value)}
               style={{ ...sel(true,false), opacity: isCostBased ? 0.5 : 1 }} disabled={isCostBased}>
-              {CURRENCIES.map(c => <option key={c}>{c}</option>)}
+              {currencies.map(c => <option key={c}>{c}</option>)}
             </select>
           </Field>
           <Field label="Cost source">

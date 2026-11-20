@@ -5,7 +5,7 @@ import { fillVatPair } from '../../lib/vat';
 import { fetchBrands, fetchRates, bulkSaveItems, checkExisting, fetchItemsByCodes } from '../../lib/db';
 import { PRICE_BASIS_VALUES, isCostPriced, basisPrice } from '../../lib/priceBases';
 import { DERIVED, PRICE_COLUMNS } from '../../lib/markets';
-import { t, inp, sel, btnW, btnG, btnSm, lbl, groupBox, groupHead, CURRENCIES } from './styles';
+import { t, inp, sel, btnW, btnG, btnSm, lbl, groupBox, groupHead } from './styles';
 import { useAuth } from '../../lib/AuthContext';
 import BrandSelect from './BrandSelect';
 import BulkUpdatePaste from './BulkUpdatePaste';
@@ -14,6 +14,7 @@ import {
   generateTemplate, validateAndCalc, processRows,
 } from '../../lib/bulkImport';
 import PastePanel from './bulk/PastePanel';
+import { useCurrencies } from '../../lib/currencies';
 import DiffModal from './bulk/DiffModal';
 import { EditCell, ApplyAll, StatusBadge } from './bulk/cells';
 import ImportSummary from './bulk/ImportSummary';
@@ -21,6 +22,7 @@ import ImportDone from './bulk/ImportDone';
 
 // ── MAIN COMPONENT ────────────────────────────────────────────
 export default function BulkUpload({ onToast }) {
+  const currencies = useCurrencies();
   const { isViewer } = useAuth();
   const [stage,      setStage]      = useState('drop'); // drop | summary | review | done
   const [rows,       setRows]       = useState([]);
@@ -327,8 +329,8 @@ export default function BulkUpload({ onToast }) {
 
   const EDITABLE_COLS = {
     brand_code:            {},  // handled by BrandSelect, not EditCell
-    cost_currency:         { options: CURRENCIES },
-    msrp_primary_currency: { options: CURRENCIES },
+    cost_currency:         { options: currencies },
+    msrp_primary_currency: { options: currencies },
     price_used:            { options: PRICE_BASIS_VALUES },
     cost_source:           { options: SOURCES },
     price_source:          { options: SOURCES },
