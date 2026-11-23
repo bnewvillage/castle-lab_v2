@@ -63,6 +63,9 @@ export const projectAsItem = (p) => ({
   item_name:  p.project_item_name,
   brand_code: PROJECT_BRAND,
   barcode:    null,
+  // Its cost, so its company base cost can be worked out: a project item has none stored.
+  exw_cost:      toNum(p.cost),
+  cost_currency: p.cost_currency ?? null,
   ...Object.fromEntries(MARKETS.map(m => [m.price, toNum(m === UAE ? p.msrp_aed_ex_vat : p[m.price])])),
 });
 

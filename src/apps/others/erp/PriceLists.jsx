@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { t, btnG } from '../../pricing/styles';
-import { fetchPriceRows, withProjectBrand } from '../../../lib/erpPrices';
+import { fetchPriceRows, withProjectBrand, fillStockRows } from '../../../lib/erpPrices';
 import { downloadXLSX } from '../../../lib/xlsxExport';
 import { fetchReportsIndependently } from '../../../lib/erpReports';
-import { MARKETS, PRICE_COLUMNS } from '../../../lib/markets';
+import { MARKETS } from '../../../lib/markets';
+import { fetchRates } from '../../../lib/db';
 import ErpConnection from '../ErpConnection';
 import {
   PRICE_REPORTS, fetchReport, codeKey, today, useJob, useBrandList,
@@ -104,33 +105,11 @@ export default function PriceLists({ creds, setCreds }) {
     addLog(`Matching on "${itemKey}".`);
 
     addLog('Fetching DB prices...');
-    const db          = await fetchPriceRows();
-    const dbRows      = db.rows;
-    const dbByCode    = Object.fromEntries(dbRows.map(r => [r.item_code?.toUpperCase(), r]));
-    const dbByBarcode = Object.fromEntries(dbRows.filter(r => r.barcode).map(r => [String(r.barcode).toUpperCase(), r]));
+    const [db, rates] = await Promise.all([fetchPriceRows(), fetchRates()]);
     addLog(dbLog(db));
-
-    const filled = rows.map(r => {
-      const key    = String(r[itemKey] ?? '').toUpperCase();
-      const byCode = dbByCode[key];
-      const byBar  = !byCode ? dbByBarcode[key] : null;
-      const db     = byCode ?? byBar ?? null;
-      return {
-        ...r,
-        barcode:    db?.barcode  ?? '',
-        ...Object.fromEntries(PRICE_COLUMNS.map(c => [c, db?.[c] ?? ''])),
-        match_type: byCode ? 'item_code' : byBar ? 'barcode' : 'no_match',
-        _missing:   !db,
-      };
-    });
-
-    // Report columns first, then the ones we appended — keeps the sheet
-    // recognisable next to the ERP view.
-    const added    = ['barcode', ...PRICE_COLUMNS, 'match_type'];
-    const original = Object.keys(rows[0]).filter(k => !added.includes(k));
-    const matched  = filled.filter(r => !r._missing).length;
-    addLog(`${matched.toLocaleString()} of ${filled.length.toLocaleString()} priced from the DB.`);
-    return { rows: filled, headers: [...original, ...added], matched };
+    const result = fillStockRows(rows, itemKey, db.rows, rates);
+    addLog(`${result.matched.toLocaleString()} of ${result.rows.length.toLocaleString()} priced from the DB.`);
+    return result;
   });
 
   return (
@@ -188,7 +167,7 @@ export default function PriceLists({ creds, setCreds }) {
       </Section>
 
       <Section title="Stock Without Price" tight={stk.log.length > 0}
-        description={`Pull the ERP's in-stock-without-price report and fill in ${CURRENCIES.slice(0, -1).join(', ')} and ${CURRENCIES[CURRENCIES.length - 1]} from the pricing master and project items.`}
+        description={`Pull the ERP's in-stock-without-price report and fill in ${CURRENCIES.slice(0, -1).join(', ')} and ${CURRENCIES[CURRENCIES.length - 1]} from the pricing master and project items, with each item's company base cost in the same currencies.`}
         controls={<RunBtn label="Fetch & Fill" loading={stk.loading} disabled={!isConnected} onClick={handleStockNoPrice} />}>
         <LogBox lines={stk.log} />
         <ErrBox msg={stk.err} />

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { fetchItemList, fetchHistory, deleteItem } from '../../lib/db';
 import { calcAllMargins, formatMargin, MARGIN_COLORS } from '../../lib/pricing';
 import EmployeePrices from './EmployeePrices';
+import BaseCosts from './BaseCosts';
 import { basisPrice } from '../../lib/priceBases';
 import { money } from '../../lib/num';
 import { MARKETS, PRICE_COLUMNS } from '../../lib/markets';
@@ -154,7 +155,8 @@ function InlineSummary({ item, rates }) {
                   </div>
                 );
               })()}
-              <EmployeePrices item={item} rates={rates} style={{ paddingTop:8 }} />
+              <BaseCosts item={item} style={{ paddingTop:8 }} />
+              <EmployeePrices item={item} rates={rates} />
             </div>
 
             {/* Col 2 — Last edited by */}

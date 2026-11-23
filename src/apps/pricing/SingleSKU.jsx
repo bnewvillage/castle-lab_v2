@@ -12,6 +12,7 @@ import { t, inp, sel, btnW, btnG, btnSm, lbl, sub, fg, groupBox, groupHead, segD
 import BrandSelect from './BrandSelect';
 import BrandProfile from './BrandProfile';
 import EmployeePrices from './EmployeePrices';
+import BaseCosts from './BaseCosts';
 import { useAuth } from '../../lib/AuthContext';
 import { downloadXLSX } from '../../lib/xlsxExport';
 
@@ -262,7 +263,10 @@ export default function SingleSKU({ rates, brands, editTarget, onEditTargetConsu
                 </div>
               );
             })()}
-            <EmployeePrices item={selected} rates={rates} style={{ padding:'8px 20px', borderTop:`1px solid ${t.b1}` }} />
+            <div style={{ padding:'8px 20px', borderTop:`1px solid ${t.b1}` }}>
+              <BaseCosts item={selected} />
+              <EmployeePrices item={selected} rates={rates} />
+            </div>
             {history.length>0&&(
               <div style={{ background:t.bg1, borderTop:`1px solid ${t.b1}`, padding:'20px 24px' }}>
                 <div style={{ fontSize:11, color:t.t4, textTransform:'uppercase', letterSpacing:'0.08em', fontFamily:'var(--font-mono)', marginBottom:14 }}>Price history</div>
@@ -593,6 +597,7 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
                 <span style={{color,fontWeight:label==='Landed cost'?500:400,fontFamily:'var(--font-mono)',fontSize:12}}>{value}</span>
               </div>
             ))}
+            <BaseCosts item={item} style={{paddingTop:10}} />
           </div>
         )}
       </div>
@@ -875,7 +880,8 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
                       </div>
                     );
                   })}
-                  <EmployeePrices item={it} rates={rates} style={{ paddingTop:8 }} />
+                  <BaseCosts item={it} style={{ paddingTop:8 }} />
+                  <EmployeePrices item={it} rates={rates} />
                 </>
               ):(
                 <>
@@ -906,7 +912,8 @@ function ItemForm({ rates, brands, existing, onSave, onFail, onCancel }) {
                       </div>
                     );
                   })}
-                  <EmployeePrices item={it} rates={rates} style={{ paddingTop:9 }} />
+                  <BaseCosts item={it} style={{ paddingTop:9 }} />
+                  <EmployeePrices item={it} rates={rates} />
                 </>
               )}
 

@@ -8,7 +8,7 @@
 import { store } from './demoData';
 import { brandDefaultsFrom } from '../lib/pricing';
 import { itemRow, projectItemRow } from '../lib/rows';
-import { MARKETS, PRICE_COLUMNS, REAL_COLUMNS, HISTORY_COLUMNS } from '../lib/markets';
+import { MARKETS, PRICE_COLUMNS, REAL_COLUMNS, HISTORY_COLUMNS, BASE_COST_COLUMNS } from '../lib/markets';
 import { DEMO_USER } from './demoConfig';
 import { matchesSearch } from '../lib/search';
 
@@ -249,7 +249,7 @@ export async function fetchAllItemsForErpAutomation(brandCodes) {
   return store.pricingMaster
     .filter(i => i.item_code && (!filtered || brandCodes.includes(i.brand_code)))
     .sort((a, b) => a.item_code.localeCompare(b.item_code))
-    .map(i => ({ item_code: i.item_code, item_name: i.item_name, brand_code: i.brand_code, barcode: i.barcode ?? null, ...pick(i, PRICE_COLUMNS) }));
+    .map(i => ({ item_code: i.item_code, item_name: i.item_name, brand_code: i.brand_code, barcode: i.barcode ?? null, ...pick(i, PRICE_COLUMNS), ...pick(i, BASE_COST_COLUMNS) }));
 }
 
 export async function fetchBrandItems(brandCode) {
